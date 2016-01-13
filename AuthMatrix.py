@@ -553,10 +553,12 @@ class MatrixDB():
         self.lock.release()
 
     def load(self, db, callbacks, helpers):
-        def loadRequestResponse(callbacks, helpers, host, port, protocol, requestData):
+        def loadRequestResponse(index, callbacks, helpers, host, port, protocol, requestData):
+            # TODO Index is used because of an awful timing issue, where if this thread times out, it will still update temprequestresponse later on
+            # TODO also this still has a UI lock...
             try:
                 # Due to Burp Extension API, must create a original request for all messages
-                self.tempRequestResponse = callbacks.makeHttpRequest(helpers.buildHttpService(host, port, protocol),requestData)
+                self.tempRequestResponse[index] = callbacks.makeHttpRequest(helpers.buildHttpService(host, port, protocol),requestData)
             except:
                 traceback.print_exc(file=callbacks.getStderr())
 
@@ -567,16 +569,22 @@ class MatrixDB():
         self.deletedRoleCount = db.deletedRoleCount
         self.deletedMessageCount = db.deletedMessageCount
         self.arrayOfMessages = ArrayList()
-        for message in db.arrayOfMessages:
-            self.tempRequestResponse = None
-            t = Thread(target=loadRequestResponse, args = [callbacks, helpers, message._host, message._port, message._protocol, message._requestData])
+
+        self.tempRequestResponse = []
+        index=0
+        for message in db.arrayOfMessages: 
+            self.tempRequestResponse.append(None)
+            t = Thread(target=loadRequestResponse, args = [index, callbacks, helpers, message._host, message._port, message._protocol, message._requestData])
             t.start()
-            t.join()
-            self.arrayOfMessages.append(MessageEntry(
-                message._index,
-                message._tableRow,
-                callbacks.saveBuffersToTempFiles(self.tempRequestResponse),
-                message._url, message._roles, message._successRegex, message._deleted))
+            # TODO fix timeout here to be non-static
+            t.join(1.0)
+            if not t.isAlive() and self.tempRequestResponse[index] != None:
+                self.arrayOfMessages.append(MessageEntry(
+                    message._index,
+                    message._tableRow,
+                    callbacks.saveBuffersToTempFiles(self.tempRequestResponse[index]),
+                    message._url, message._roles, message._successRegex, message._deleted))
+            index += 1
         self.lock.release()
 
     
@@ -936,7 +944,8 @@ class UserTable(JTable):
         self.getModel().fireTableDataChanged()
         # Resize
         self.getColumnModel().getColumn(0).setMinWidth(100);
-        self.getColumnModel().getColumn(0).setMaxWidth(100);
+        # FIXED: removed due to Jordyn request
+        #self.getColumnModel().getColumn(0).setMaxWidth(100);
 
         self.getColumnModel().getColumn(1).setMinWidth(100);
         self.getColumnModel().getColumn(1).setMaxWidth(100);
@@ -1036,6 +1045,7 @@ class RoleEntry:
         return self._uTableColumn
 
 # Serializable DB
+# Only used to store Database to Disk on Save and Load
 class MatrixDBData():
 
     def __init__(self, m, r, u, cu, cr, cm):
@@ -1048,6 +1058,7 @@ class MatrixDBData():
         self.deletedMessageCount = cm
 
 # Serializable MessageEntry
+# Must be used since the Burp RequestResponse object can not be serialized
 class MessageEntryData:
 
     def __init__(self, index, tableRow, requestData, host, port, protocol, url, roles, successRegex, deleted):
