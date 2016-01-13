@@ -464,6 +464,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     return False
         return True
 
+##
+## DB Class that holds all configuration data
+##
 
 class MatrixDB():
 
@@ -577,7 +580,7 @@ class MatrixDB():
             t = Thread(target=loadRequestResponse, args = [index, callbacks, helpers, message._host, message._port, message._protocol, message._requestData])
             t.start()
             # TODO fix timeout here to be non-static
-            t.join(1.0)
+            t.join(2.0)
             if not t.isAlive() and self.tempRequestResponse[index] != None:
                 self.arrayOfMessages.append(MessageEntry(
                     message._index,
@@ -708,7 +711,7 @@ class MessageTableModel(AbstractTableModel):
         messageEntry = self._db.getMessageByRow(rowIndex)
         if messageEntry:
             if columnIndex == 0:
-                # TODO maybe change this to row?
+                # TODO maybe change this to returning the row and not private value index?
                 return str(messageEntry._index)
             elif columnIndex == 1:
                 # TODO maybe change this to full URL?
@@ -801,6 +804,7 @@ class MessageTable(JTable):
         # NOTE: this is prob ineffecient but it should catchall for changes to the table
         self.getModel().fireTableStructureChanged()
         self.getModel().fireTableDataChanged()
+
         # Resize
         self.getColumnModel().getColumn(0).setMinWidth(30);
         self.getColumnModel().getColumn(0).setMaxWidth(30);
@@ -942,9 +946,10 @@ class UserTable(JTable):
         # NOTE: this is prob ineffecient but it should catchall for changes to the table
         self.getModel().fireTableStructureChanged()
         self.getModel().fireTableDataChanged()
+        
         # Resize
         self.getColumnModel().getColumn(0).setMinWidth(100);
-        # FIXED: removed due to Jordyn request
+        # FIXED: removed due to user feedback
         #self.getColumnModel().getColumn(0).setMaxWidth(100);
 
         self.getColumnModel().getColumn(1).setMinWidth(100);
@@ -955,9 +960,9 @@ class UserTable(JTable):
 
         self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
 
-#
-# class to hold details of each request
-#
+##
+## Classes for Messages, Roles, and Users
+##
 
 class MessageEntry:
 
@@ -973,7 +978,7 @@ class MessageEntry:
         self._roleResults = {}
         return
 
-    # Role are the index of the db Role array and a bool for enabled or not
+    # Role are the index of the db Role array and a bool for whether the checkbox is default enabled or not
     def addRoleByIndex(self,userIndex,enabled=False):
         self._roles[userIndex] = enabled;
 
@@ -1006,7 +1011,7 @@ class UserEntry:
         self._token = token
         return
 
-    # Roles are the index of the db role array and a bool for enabled or not
+    # Roles are the index of the db role array and a bool for whether the checkbox is default enabled or not
     def addRoleByIndex(self, roleIndex, enabled=False):
         self._roles[roleIndex] = enabled
 
@@ -1044,8 +1049,12 @@ class RoleEntry:
     def getUTableColumn(self):
         return self._uTableColumn
 
+###
+### SERIALIZABLE CLASSES
+###
+
 # Serializable DB
-# Only used to store Database to Disk on Save and Load
+# Used to store Database to Disk on Save and Load
 class MatrixDBData():
 
     def __init__(self, m, r, u, cu, cr, cm):
@@ -1058,7 +1067,7 @@ class MatrixDBData():
         self.deletedMessageCount = cm
 
 # Serializable MessageEntry
-# Must be used since the Burp RequestResponse object can not be serialized
+# Used since the Burp RequestResponse object can not be serialized
 class MessageEntryData:
 
     def __init__(self, index, tableRow, requestData, host, port, protocol, url, roles, successRegex, deleted):
