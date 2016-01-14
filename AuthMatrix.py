@@ -383,7 +383,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         for userIndex in self._db.getActiveUserIndexes():
             userEntry = self._db.arrayOfUsers[userIndex]
             headers = requestInfo.getHeaders()
-            if userEntry._isCookie:
+            if userEntry.isCookie():
                 cookieHeader = "Cookie:"
                 newheader = cookieHeader
                 # getHeaders has to be called again here cuz of java references
@@ -425,8 +425,34 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             headers.remove(header)
 
             headers.add(newheader)
+
+            # Add static CSRF token if available
+            # TODO: Kinda hacky, but for now it will add the token as long as there is some content int he post body
+            # Even if its a GET request.  This screws up when original requests have no body though... oh well...
+            newBody = reqBody
+            if userEntry._staticcsrf and len(reqBody):
+                delimeter = userEntry._staticcsrf.find("=")
+                if delimeter >= 0:
+                    csrfname = userEntry._staticcsrf[0:delimeter]
+                    csrfvalue = userEntry._staticcsrf[delimeter+1:]
+                    params = requestInfo.getParameters()
+                    for param in params:
+                        if str(param.getName())==csrfname:
+                            # Handle CSRF Tokens in Body
+                            if param.getType() == 1:
+                                newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
+                            # Handle CSRF Tokens in Cookies (for Cookie==Body mitigation technique):
+                            if param.getType() == 2:
+                                # TODO: required moving above portion to a function
+                                # TODO: also need to think about when cookie name != postarg name
+                                print "Cookie CSRF Tokens are not currently supported"
+                    if newBody == reqBody:
+                        newBody = reqBody+StringUtil.toBytes("&"+userEntry._staticcsrf)
+
+
+
             # Construct and send a message with the new headers
-            message = self._helpers.buildHttpMessage(headers, reqBody)
+            message = self._helpers.buildHttpMessage(headers, newBody)
             requestResponse = self._callbacks.makeHttpRequest(messageInfo.getHttpService(),message)
             messageEntry.addRunByUserIndex(userIndex, self._callbacks.saveBuffersToTempFiles(requestResponse))
 
@@ -484,7 +510,7 @@ class MatrixDB():
         self.deletedMessageCount = 0
 
     # Returns the index of the user, whether its new or not
-    def getOrCreateUser(self, name, isCookie=True, token=""):
+    def getOrCreateUser(self, name, token=""):
         self.lock.acquire()
         userIndex = -1
         # Check if User already exits
@@ -496,7 +522,7 @@ class MatrixDB():
             userIndex = self.arrayOfUsers.size()
             self.arrayOfUsers.append(UserEntry(userIndex,
                 userIndex - self.deletedUserCount,
-                name, isCookie, token))
+                name, token))
 
             # Add all existing roles as unchecked
             for roleIndex in self.getActiveRoleIndexes():
@@ -877,9 +903,9 @@ class UserTableModel(AbstractTableModel):
         if columnIndex == 0:
             return "User"
         elif columnIndex == 1:
-            return "Is a Cookie?"
-        elif columnIndex == 2:
             return "Session Token"
+        elif columnIndex == 2:
+            return "Static CSRF Token (Optional)"
         else:
             roleEntry = self._db.getRoleByUColumn(columnIndex)
             if roleEntry:
@@ -892,9 +918,9 @@ class UserTableModel(AbstractTableModel):
             if columnIndex == 0:
                 return str(userEntry._name)
             elif columnIndex == 1:
-                return userEntry._isCookie
-            elif columnIndex == 2:
                 return userEntry._token
+            elif columnIndex == 2:
+                return userEntry._staticcsrf
             else:
                 roleEntry = self._db.getRoleByUColumn(columnIndex)
                 if roleEntry:
@@ -914,9 +940,9 @@ class UserTableModel(AbstractTableModel):
             if col == 0:
                 userEntry._name = val
             elif col == 1:
-                userEntry._isCookie = val
-            elif col == 2:
                 userEntry._token = val
+            elif col == 2:
+                userEntry._staticcsrf = val
             else:
                 roleIndex = self._db.getRoleByUColumn(col)._index
                 userEntry.addRoleByIndex(roleIndex, val)
@@ -929,7 +955,7 @@ class UserTableModel(AbstractTableModel):
         
     # Create checkboxes
     def getColumnClass(self, columnIndex):
-        if columnIndex == 0 or columnIndex == 2:
+        if columnIndex <= 2:
             return str
         else:
             return Boolean
@@ -948,15 +974,18 @@ class UserTable(JTable):
         self.getModel().fireTableDataChanged()
         
         # Resize
+        # User Name
         self.getColumnModel().getColumn(0).setMinWidth(100);
         # FIXED: removed due to user feedback
         #self.getColumnModel().getColumn(0).setMaxWidth(100);
 
-        self.getColumnModel().getColumn(1).setMinWidth(100);
-        self.getColumnModel().getColumn(1).setMaxWidth(100);
+        # Session Token
+        self.getColumnModel().getColumn(1).setMinWidth(400);
+        self.getColumnModel().getColumn(1).setMaxWidth(1200);
 
-        self.getColumnModel().getColumn(2).setMinWidth(600);
-        self.getColumnModel().getColumn(2).setMaxWidth(1200);
+        # CSRF Token
+        self.getColumnModel().getColumn(2).setMinWidth(200);
+        self.getColumnModel().getColumn(2).setMaxWidth(1600);
 
         self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
 
@@ -1001,14 +1030,14 @@ class MessageEntry:
 
 class UserEntry:
 
-    def __init__(self, index, rowIndex, name, isCookie=True, token=""):
+    def __init__(self, index, rowIndex, name, token=""):
         self._index = index
         self._name = name
         self._roles = {}
         self._deleted = False
         self._tableRow = rowIndex
-        self._isCookie = isCookie
         self._token = token
+        self._staticcsrf = ""
         return
 
     # Roles are the index of the db role array and a bool for whether the checkbox is default enabled or not
@@ -1023,6 +1052,9 @@ class UserEntry:
 
     def getTableRow(self):
         return self._tableRow
+
+    def isCookie(self):
+        return self._token.find("=") > 0 and (self._token.find(":") == -1 or self._token.find("=") < self._token.find(":"))
 
 class RoleEntry:
 
