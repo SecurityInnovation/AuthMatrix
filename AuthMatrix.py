@@ -905,7 +905,7 @@ class UserTableModel(AbstractTableModel):
         elif columnIndex == 1:
             return "Session Token"
         elif columnIndex == 2:
-            return "Static CSRF Token (Optional)"
+            return "(Optional) CSRF Token"
         else:
             roleEntry = self._db.getRoleByUColumn(columnIndex)
             if roleEntry:
@@ -976,16 +976,15 @@ class UserTable(JTable):
         # Resize
         # User Name
         self.getColumnModel().getColumn(0).setMinWidth(100);
-        # FIXED: removed due to user feedback
-        #self.getColumnModel().getColumn(0).setMaxWidth(100);
+        self.getColumnModel().getColumn(0).setMaxWidth(1000);
 
         # Session Token
-        self.getColumnModel().getColumn(1).setMinWidth(400);
-        self.getColumnModel().getColumn(1).setMaxWidth(1200);
+        self.getColumnModel().getColumn(1).setMinWidth(300);
+        self.getColumnModel().getColumn(1).setMaxWidth(1500);
 
         # CSRF Token
-        self.getColumnModel().getColumn(2).setMinWidth(200);
-        self.getColumnModel().getColumn(2).setMaxWidth(1600);
+        self.getColumnModel().getColumn(2).setMinWidth(150);
+        self.getColumnModel().getColumn(2).setMaxWidth(1500);
 
         self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
 
