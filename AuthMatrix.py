@@ -1,16 +1,22 @@
-# Copyright 2016 Mick Ayzenberg - Security Innovation
+# Copyright (c) 2016 Mick Ayzenberg - Security Innovation
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
 # 
-#     http://www.apache.org/licenses/LICENSE-2.0
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 # 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
 from burp import IBurpExtender
 from burp import ITab
@@ -61,14 +67,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     
     def	registerExtenderCallbacks(self, callbacks):
     
-        # keep a reference to our callbacks object
+        # keep a reference to our Burp callbacks object
         self._callbacks = callbacks
-        # obtain an extension helpers object
+        # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix")
+        callbacks.setExtensionName("AuthMatrix - v0.2")
 
-        # DB holding roles and messages
+        # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
 
         # For saving/loading config
@@ -81,18 +87,18 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
        
 
-        # table of User entries
+        # Table of User entries
         self._userTable = UserTable(self, model = UserTableModel(self._db))
         roleScrollPane = JScrollPane(self._userTable)
         self._userTable.redrawTable()
 
-        # table of Request entries
+        # Table of Request (AKA Message) entries
         self._messageTable = MessageTable(self, model = MessageTableModel(self._db))
         messageScrollPane = JScrollPane(self._messageTable)
         self._messageTable.redrawTable()
 
 
-        # Popup stuff
+        # Semi-Generic Popup stuff
         def addPopup(component, popup):
             class genericMouseListener(MouseAdapter):
                 def mousePressed(self, e):
@@ -151,6 +157,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._userTable.redrawTable()
 
         # TODO combine these next two classes
+        # TODO Also, clean up the variable names where M and U are in place of MessageTable and UserTable
         class actionRemoveRoleHeaderFromM(ActionListener):
             def actionPerformed(self,e):
                 if selfExtender._selectedColumn >= 0:
@@ -242,7 +249,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         callbacks.customizeUiComponent(self._tabs)
         callbacks.customizeUiComponent(buttons)
 
-        # Handels checkbox color coding
+        # Handles checkbox color coding
         # Must be bellow the customizeUiComponent calls
         self._messageTable.setDefaultRenderer(Boolean, SuccessBooleanRenderer(self._db))
 
@@ -254,9 +261,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         return
         
-    #
-    # implement ITab
-    #
+    ##
+    ## implement ITab
+    ##
     
     def getTabCaption(self):
         return "AuthMatrix"
@@ -265,9 +272,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return self._splitpane
        
 
-    #
-    # Creates the sendto tab
-    #
+    ##
+    ## Creates the sendto tab in other areas of Burp
+    ##
 
     def createMenuItems(self, invocation):
         messages = invocation.getSelectedMessages()
@@ -287,11 +294,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return(ret)
 
     
-    #
-    # implement IMessageEditorController
-    # this allows our request/response viewers to obtain details about the messages being displayed
-    #
-    
+    ##
+    ## implement IMessageEditorController
+    ## this allows our request/response viewers to obtain details about the messages being displayed
+    ##
+    ## TODO: Is this necessary? The request viewers may not require this since they aren't editable
+    ##
+
     def getHttpService(self):
         return self._currentlyDisplayedItem.getHttpService()
 
@@ -301,6 +310,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def getResponse(self):
         return self._currentlyDisplayedItem.getResponse()
 
+    ##
+    ## Actions on Bottom Row Button Clicks
+    ##
 
     def printDB(self, e):
         out = ""
@@ -357,6 +369,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._tabs.removeAll()
         t.start()
 
+    ##
+    ## Methods for running messages and analyzing results
+    ##
+
     def runMessagesThread(self, messageIndexes=None):
         self._db.lock.acquire()
         try:
@@ -371,6 +387,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._db.lock.release()
             self.colorCodeResults()
 
+    # TODO: This method is too large. Fix that
     def runMessage(self, messageIndex):
         messageEntry = self._db.arrayOfMessages[messageIndex]
         # Clear Previous Results:
@@ -383,7 +400,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         for userIndex in self._db.getActiveUserIndexes():
             userEntry = self._db.arrayOfUsers[userIndex]
             headers = requestInfo.getHeaders()
-            if userEntry._isCookie:
+            if userEntry.isCookie():
                 cookieHeader = "Cookie:"
                 newheader = cookieHeader
                 # getHeaders has to be called again here cuz of java references
@@ -425,8 +442,34 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             headers.remove(header)
 
             headers.add(newheader)
+
+            # Add static CSRF token if available
+            # TODO: Kinda hacky, but for now it will add the token as long as there is some content int he post body
+            # Even if its a GET request.  This screws up when original requests have no body though... oh well...
+            newBody = reqBody
+            if userEntry._staticcsrf and len(reqBody):
+                delimeter = userEntry._staticcsrf.find("=")
+                if delimeter >= 0:
+                    csrfname = userEntry._staticcsrf[0:delimeter]
+                    csrfvalue = userEntry._staticcsrf[delimeter+1:]
+                    params = requestInfo.getParameters()
+                    for param in params:
+                        if str(param.getName())==csrfname:
+                            # Handle CSRF Tokens in Body
+                            if param.getType() == 1:
+                                newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
+                            # Handle CSRF Tokens in Cookies (for Cookie==Body mitigation technique):
+                            if param.getType() == 2:
+                                # TODO: required moving above portion to a function
+                                # TODO: also need to think about when cookie name != postarg name
+                                print "Cookie CSRF Tokens are not currently supported"
+                    if newBody == reqBody:
+                        newBody = reqBody+StringUtil.toBytes("&"+userEntry._staticcsrf)
+
+
+
             # Construct and send a message with the new headers
-            message = self._helpers.buildHttpMessage(headers, reqBody)
+            message = self._helpers.buildHttpMessage(headers, newBody)
             requestResponse = self._callbacks.makeHttpRequest(messageInfo.getHttpService(),message)
             messageEntry.addRunByUserIndex(userIndex, self._callbacks.saveBuffersToTempFiles(requestResponse))
 
@@ -471,6 +514,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 class MatrixDB():
 
     def __init__(self):
+        # TODO: these should be global static variables instead
         # Holds all custom data
         self._staticUserTableColumnCount = 3
         self._staticMessageTableColumnCount = 3
@@ -484,7 +528,7 @@ class MatrixDB():
         self.deletedMessageCount = 0
 
     # Returns the index of the user, whether its new or not
-    def getOrCreateUser(self, name, isCookie=True, token=""):
+    def getOrCreateUser(self, name, token=""):
         self.lock.acquire()
         userIndex = -1
         # Check if User already exits
@@ -496,7 +540,7 @@ class MatrixDB():
             userIndex = self.arrayOfUsers.size()
             self.arrayOfUsers.append(UserEntry(userIndex,
                 userIndex - self.deletedUserCount,
-                name, isCookie, token))
+                name, token))
 
             # Add all existing roles as unchecked
             for roleIndex in self.getActiveRoleIndexes():
@@ -533,6 +577,7 @@ class MatrixDB():
         return roleIndex
 
     # Returns the Row of the new message
+    # Unlike Users and Roles, allow duplicate messages
     def createNewMessage(self,messagebuffer,url):
         self.lock.acquire()
         messageIndex = self.arrayOfMessages.size()
@@ -557,8 +602,9 @@ class MatrixDB():
 
     def load(self, db, callbacks, helpers):
         def loadRequestResponse(index, callbacks, helpers, host, port, protocol, requestData):
-            # TODO Index is used because of an awful timing issue, where if this thread times out, it will still update temprequestresponse later on
-            # TODO also this still has a UI lock...
+            # TODO tempRequestResont is now an array
+            # because of an awful timing issue, where if this thread times out, it will still update temprequestresponse later on..
+            # TODO also this still locks the UI until all requests suceed or time out...
             try:
                 # Due to Burp Extension API, must create a original request for all messages
                 self.tempRequestResponse[index] = callbacks.makeHttpRequest(helpers.buildHttpService(host, port, protocol),requestData)
@@ -672,13 +718,122 @@ class MatrixDB():
                     i._tableRow -= 1
         self.lock.release()
 
+    # TODO: If this method is unused, probably remove it?
     def getUserEntriesWithinRole(self, roleIndex):
         return [userEntry for userEntry in self.arrayOfUsers if userEntry._roles[roleIndex]]
 
 
-#
-# extend JTable to handle cell selection
-#
+##
+## Tables and Table Models  
+##
+    
+class UserTableModel(AbstractTableModel):
+
+    def __init__(self, db):
+        self._db = db
+
+    def getRowCount(self):
+        try:
+            return len(self._db.getActiveUserIndexes())
+        except:
+            return 0
+
+    def getColumnCount(self):
+        # TODO maybe remove this try?
+        try:
+            return len(self._db.getActiveRoleIndexes())+self._db._staticUserTableColumnCount
+        except:
+            return self._db._staticUserTableColumnCount
+
+    def getColumnName(self, columnIndex):
+        if columnIndex == 0:
+            return "User"
+        elif columnIndex == 1:
+            return "Session Token"
+        elif columnIndex == 2:
+            return "(Optional) CSRF Token"
+        else:
+            roleEntry = self._db.getRoleByUColumn(columnIndex)
+            if roleEntry:
+                return roleEntry._name
+        return ""
+
+    def getValueAt(self, rowIndex, columnIndex):
+        userEntry = self._db.getUserByRow(rowIndex)
+        if userEntry:
+            if columnIndex == 0:
+                return str(userEntry._name)
+            elif columnIndex == 1:
+                return userEntry._token
+            elif columnIndex == 2:
+                return userEntry._staticcsrf
+            else:
+                roleEntry = self._db.getRoleByUColumn(columnIndex)
+                if roleEntry:
+                    roleIndex = roleEntry._index
+                    return roleIndex in userEntry._roles and userEntry._roles[roleIndex]
+        return ""
+
+    def addRow(self, row):
+        self.fireTableRowsInserted(row,row)
+
+    def setValueAt(self, val, row, col):
+        # NOTE: testing if .locked is ok here since its a manual operation
+        if self._db.lock.locked():
+            return
+        userEntry = self._db.getUserByRow(row)
+        if userEntry:
+            if col == 0:
+                userEntry._name = val
+            elif col == 1:
+                userEntry._token = val
+            elif col == 2:
+                userEntry._staticcsrf = val
+            else:
+                roleIndex = self._db.getRoleByUColumn(col)._index
+                userEntry.addRoleByIndex(roleIndex, val)
+
+        self.fireTableCellUpdated(row,col)
+
+    # Set checkboxes and role editable
+    def isCellEditable(self, row, col):
+        return True
+        
+    # Create checkboxes
+    def getColumnClass(self, columnIndex):
+        if columnIndex <= 2:
+            return str
+        else:
+            return Boolean
+
+
+class UserTable(JTable):
+
+    def __init__(self, extender, model):
+        self._extender = extender
+        self.setModel(model)
+        return
+
+    def redrawTable(self):
+        # NOTE: this is prob ineffecient but it should catchall for changes to the table
+        self.getModel().fireTableStructureChanged()
+        self.getModel().fireTableDataChanged()
+        
+        # Resize
+        # User Name
+        self.getColumnModel().getColumn(0).setMinWidth(100);
+        self.getColumnModel().getColumn(0).setMaxWidth(1000);
+
+        # Session Token
+        self.getColumnModel().getColumn(1).setMinWidth(300);
+        self.getColumnModel().getColumn(1).setMaxWidth(1500);
+
+        # CSRF Token
+        self.getColumnModel().getColumn(2).setMinWidth(150);
+        self.getColumnModel().getColumn(2).setMaxWidth(1500);
+
+        self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
+
 
 class MessageTableModel(AbstractTableModel):
 
@@ -811,9 +966,7 @@ class MessageTable(JTable):
         self.getColumnModel().getColumn(1).setMinWidth(300);
         self.getColumnModel().getColumn(2).setMinWidth(150);
 
-
-
-# For colorcoding checkboxes in the message table
+# For color-coding checkboxes in the message table
 class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
     def __init__(self, db):
@@ -834,7 +987,7 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
             self.setBackground(table.getBackground())
 
         # Color based on results
-        # TODO adjust to more pleasent colors
+        # TODO adjust to more pleasant colors
         if column >= self._db._staticMessageTableColumnCount:
             messageEntry = self._db.getMessageByRow(row)
             if messageEntry:
@@ -844,7 +997,7 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
                     if not roleIndex in messageEntry._roleResults:
                         self.setBackground(table.getBackground())
                     else:
-                        # TODO: make this look good
+                        # TODO: Make a Border for the results that looks good
                         #self.setBorder(MatteBorder(0,1,1,0,Color.BLACK))
                         #self.setBorderPainted(True)
                         if messageEntry._roleResults[roleIndex]:
@@ -854,111 +1007,6 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
         return self
       
-    
-class UserTableModel(AbstractTableModel):
-
-    def __init__(self, db):
-        self._db = db
-
-    def getRowCount(self):
-        try:
-            return len(self._db.getActiveUserIndexes())
-        except:
-            return 0
-
-    def getColumnCount(self):
-        # TODO maybe remove this try?
-        try:
-            return len(self._db.getActiveRoleIndexes())+self._db._staticUserTableColumnCount
-        except:
-            return self._db._staticUserTableColumnCount
-
-    def getColumnName(self, columnIndex):
-        if columnIndex == 0:
-            return "User"
-        elif columnIndex == 1:
-            return "Is a Cookie?"
-        elif columnIndex == 2:
-            return "Session Token"
-        else:
-            roleEntry = self._db.getRoleByUColumn(columnIndex)
-            if roleEntry:
-                return roleEntry._name
-        return ""
-
-    def getValueAt(self, rowIndex, columnIndex):
-        userEntry = self._db.getUserByRow(rowIndex)
-        if userEntry:
-            if columnIndex == 0:
-                return str(userEntry._name)
-            elif columnIndex == 1:
-                return userEntry._isCookie
-            elif columnIndex == 2:
-                return userEntry._token
-            else:
-                roleEntry = self._db.getRoleByUColumn(columnIndex)
-                if roleEntry:
-                    roleIndex = roleEntry._index
-                    return roleIndex in userEntry._roles and userEntry._roles[roleIndex]
-        return ""
-
-    def addRow(self, row):
-        self.fireTableRowsInserted(row,row)
-
-    def setValueAt(self, val, row, col):
-        # NOTE: testing if .locked is ok here since its a manual operation
-        if self._db.lock.locked():
-            return
-        userEntry = self._db.getUserByRow(row)
-        if userEntry:
-            if col == 0:
-                userEntry._name = val
-            elif col == 1:
-                userEntry._isCookie = val
-            elif col == 2:
-                userEntry._token = val
-            else:
-                roleIndex = self._db.getRoleByUColumn(col)._index
-                userEntry.addRoleByIndex(roleIndex, val)
-
-        self.fireTableCellUpdated(row,col)
-
-    # Set checkboxes and role editable
-    def isCellEditable(self, row, col):
-        return True
-        
-    # Create checkboxes
-    def getColumnClass(self, columnIndex):
-        if columnIndex == 0 or columnIndex == 2:
-            return str
-        else:
-            return Boolean
-
-
-class UserTable(JTable):
-
-    def __init__(self, extender, model):
-        self._extender = extender
-        self.setModel(model)
-        return
-
-    def redrawTable(self):
-        # NOTE: this is prob ineffecient but it should catchall for changes to the table
-        self.getModel().fireTableStructureChanged()
-        self.getModel().fireTableDataChanged()
-        
-        # Resize
-        self.getColumnModel().getColumn(0).setMinWidth(100);
-        # FIXED: removed due to user feedback
-        #self.getColumnModel().getColumn(0).setMaxWidth(100);
-
-        self.getColumnModel().getColumn(1).setMinWidth(100);
-        self.getColumnModel().getColumn(1).setMaxWidth(100);
-
-        self.getColumnModel().getColumn(2).setMinWidth(600);
-        self.getColumnModel().getColumn(2).setMaxWidth(1200);
-
-        self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
 
 ##
 ## Classes for Messages, Roles, and Users
@@ -1001,14 +1049,14 @@ class MessageEntry:
 
 class UserEntry:
 
-    def __init__(self, index, rowIndex, name, isCookie=True, token=""):
+    def __init__(self, index, rowIndex, name, token=""):
         self._index = index
         self._name = name
         self._roles = {}
         self._deleted = False
         self._tableRow = rowIndex
-        self._isCookie = isCookie
         self._token = token
+        self._staticcsrf = ""
         return
 
     # Roles are the index of the db role array and a bool for whether the checkbox is default enabled or not
@@ -1023,6 +1071,9 @@ class UserEntry:
 
     def getTableRow(self):
         return self._tableRow
+
+    def isCookie(self):
+        return self._token.find("=") > 0 and (self._token.find(":") == -1 or self._token.find("=") < self._token.find(":"))
 
 class RoleEntry:
 
@@ -1049,9 +1100,9 @@ class RoleEntry:
     def getUTableColumn(self):
         return self._uTableColumn
 
-###
-### SERIALIZABLE CLASSES
-###
+##
+## SERIALIZABLE CLASSES
+##
 
 # Serializable DB
 # Used to store Database to Disk on Save and Load
