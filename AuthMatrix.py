@@ -867,7 +867,7 @@ class MessageTableModel(AbstractTableModel):
         if columnIndex == 0:
             return "ID"
         elif columnIndex == 1:
-            return "Name"
+            return "Request Name"
         elif columnIndex == 2:
             return "Success Regex"
         else:
