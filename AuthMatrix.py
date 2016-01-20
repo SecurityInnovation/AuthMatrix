@@ -85,7 +85,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._selectedColumn = -1
         self._selectedRow = -1
 
-       
 
         # Table of User entries
         self._userTable = UserTable(self, model = UserTableModel(self._db))
@@ -336,19 +335,35 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._messageTable.redrawTable()
 
     def saveClick(self, e):
-        # TODO: add confirmation on file overwrite?
         returnVal = self._fc.showSaveDialog(self._splitpane)
         if returnVal == JFileChooser.APPROVE_OPTION:
-            fileName = self._fc.getSelectedFile().getPath()
+            f = self._fc.getSelectedFile()
+            if f.exists():
+                result = JOptionPane.showConfirmDialog(self._splitpane, "The file exists, overwrite?", "Existing File", JOptionPane.YES_NO_OPTION)
+                if result != JOptionPane.YES_OPTION:
+                    return
+            fileName = f.getPath()
             outs = io.ObjectOutputStream(io.FileOutputStream(fileName))
             outs.writeObject(self._db.getSaveableObject())
             outs.close()
 
     def loadClick(self,e):
-        # TODO warn user about loading unsafe thing
         returnVal = self._fc.showOpenDialog(self._splitpane)
         if returnVal == JFileChooser.APPROVE_OPTION:
-            fileName = self._fc.getSelectedFile().getPath()
+            warning = """
+            CAUTION: 
+
+            Loading a saved configuration deserializes data. 
+            This action may pose a security threat to the application.
+            Only proceed when the source and contents of this file is trusted. 
+
+            Load Selected File?
+            """
+            result = JOptionPane.showOptionDialog(self._splitpane, warning, "Caution", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE, None, ["OK", "Cancel"],"OK")
+            if result != JOptionPane.YES_OPTION:
+                return
+            f = self._fc.getSelectedFile()
+            fileName = f.getPath()
             
             ins = io.ObjectInputStream(io.FileInputStream(fileName))
             dbData=ins.readObject()
