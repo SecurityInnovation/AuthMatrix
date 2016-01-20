@@ -110,7 +110,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     if type(component) is JTableHeader:
                         table = component.getTable()
                         column = component.columnAtPoint(e.getPoint())
-                        if type(table) is MessageTable and column >= selfExtender._db._staticMessageTableColumnCount or type(table) is UserTable and column >= selfExtender._db._staticUserTableColumnCount:
+                        if type(table) is MessageTable and column >= selfExtender._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT or type(table) is UserTable and column >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT:
                             selfExtender._selectedColumn = column
                         else:
                             return
@@ -459,7 +459,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             headers.add(newheader)
 
             # Add static CSRF token if available
-            # TODO: Kinda hacky, but for now it will add the token as long as there is some content int he post body
+            # TODO: Kinda hacky, but for now it will add the token as long as there is some content in the post body
             # Even if its a GET request.  This screws up when original requests have no body though... oh well...
             newBody = reqBody
             if userEntry._staticcsrf and len(reqBody):
@@ -499,7 +499,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._messageTable.redrawTable()
 
     def checkResult(self, messageEntry, roleIndex, activeSuccessRoles):
-        # TODO FIX calculate should succeed
         for userIndex in self._db.getActiveUserIndexes():
             userEntry = self._db.arrayOfUsers[userIndex]
 
@@ -529,10 +528,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 class MatrixDB():
 
     def __init__(self):
-        # TODO: these should be global static variables instead
         # Holds all custom data
-        self._staticUserTableColumnCount = 3
-        self._staticMessageTableColumnCount = 3
+        # TODO: consider moving these constants to a different class
+        self.STATIC_USER_TABLE_COLUMN_COUNT = 3
+        self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
 
         self.lock = Lock()
         self.arrayOfMessages = ArrayList()
@@ -576,8 +575,8 @@ class MatrixDB():
         if roleIndex < 0:
             roleIndex = self.arrayOfRoles.size()
             self.arrayOfRoles.append(RoleEntry(roleIndex,
-                roleIndex + self._staticMessageTableColumnCount - self.deletedRoleCount,
-                roleIndex + self._staticUserTableColumnCount - self.deletedRoleCount,
+                roleIndex + self.STATIC_MESSAGE_TABLE_COLUMN_COUNT - self.deletedRoleCount,
+                roleIndex + self.STATIC_USER_TABLE_COLUMN_COUNT - self.deletedRoleCount,
                 role))
 
             # Add new role to each existing user as unchecked
@@ -618,7 +617,7 @@ class MatrixDB():
     def load(self, db, callbacks, helpers):
         def loadRequestResponse(index, callbacks, helpers, host, port, protocol, requestData):
             # TODO tempRequestResont is now an array
-            # because of an awful timing issue, where if this thread times out, it will still update temprequestresponse later on..
+            # because of a timing issue, where if this thread times out, it will still update temprequestresponse later on..
             # TODO also this still locks the UI until all requests suceed or time out...
             try:
                 # Due to Burp Extension API, must create a original request for all messages
@@ -756,9 +755,9 @@ class UserTableModel(AbstractTableModel):
     def getColumnCount(self):
         # TODO maybe remove this try?
         try:
-            return len(self._db.getActiveRoleIndexes())+self._db._staticUserTableColumnCount
+            return len(self._db.getActiveRoleIndexes())+self._db.STATIC_USER_TABLE_COLUMN_COUNT
         except:
-            return self._db._staticUserTableColumnCount
+            return self._db.STATIC_USER_TABLE_COLUMN_COUNT
 
     def getColumnName(self, columnIndex):
         if columnIndex == 0:
@@ -862,7 +861,7 @@ class MessageTableModel(AbstractTableModel):
             return 0
 
     def getColumnCount(self):
-        return self._db._staticMessageTableColumnCount+len(self._db.getActiveRoleIndexes())
+        return self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT+len(self._db.getActiveRoleIndexes())
 
     def getColumnName(self, columnIndex):
         if columnIndex == 0:
@@ -905,7 +904,7 @@ class MessageTableModel(AbstractTableModel):
         if self._db.lock.locked():
             return
         messageEntry = self._db.getMessageByRow(row)
-        if col == self._db._staticMessageTableColumnCount-1:
+        if col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
             messageEntry._successRegex = val
         else:
             roleIndex = self._db.getRoleByMColumn(col)._index
@@ -915,13 +914,13 @@ class MessageTableModel(AbstractTableModel):
     # Set checkboxes editable
     def isCellEditable(self, row, col):
         # Include regex
-        if col >= self._db._staticMessageTableColumnCount-1:
+        if col >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
             return True
         return False
 
     # Create checkboxes
     def getColumnClass(self, columnIndex):
-        if columnIndex < self._db._staticMessageTableColumnCount:
+        if columnIndex < self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT:
             return str
         else:
             return Boolean
@@ -1003,7 +1002,7 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
         # Color based on results
         # TODO adjust to more pleasant colors
-        if column >= self._db._staticMessageTableColumnCount:
+        if column >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT:
             messageEntry = self._db.getMessageByRow(row)
             if messageEntry:
                 roleEntry = self._db.getRoleByMColumn(column)
