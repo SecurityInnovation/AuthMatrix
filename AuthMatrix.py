@@ -72,7 +72,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.2")
+        callbacks.setExtensionName("AuthMatrix - v0.3")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -646,7 +646,7 @@ class MatrixDB():
                     message._index,
                     message._tableRow,
                     callbacks.saveBuffersToTempFiles(self.tempRequestResponse[index]),
-                    message._url, message._roles, message._successRegex, message._deleted))
+                    message._url, message._name, message._roles, message._successRegex, message._deleted))
             index += 1
         self.lock.release()
 
@@ -664,7 +664,7 @@ class MatrixDB():
                 message._requestResponse.getHttpService().getHost(),
                 message._requestResponse.getHttpService().getPort(),
                 message._requestResponse.getHttpService().getProtocol(),
-                message._url, message._roles, message._successRegex, message._deleted))
+                message._url, message._name, message._roles, message._successRegex, message._deleted))
         ret = MatrixDBData(serializedMessages,self.arrayOfRoles, self.arrayOfUsers, self.deletedUserCount, self.deletedRoleCount, self.deletedMessageCount)
         self.lock.release()
         return ret
@@ -867,7 +867,7 @@ class MessageTableModel(AbstractTableModel):
         if columnIndex == 0:
             return "ID"
         elif columnIndex == 1:
-            return "URL"
+            return "Request Name"
         elif columnIndex == 2:
             return "Success Regex"
         else:
@@ -883,10 +883,7 @@ class MessageTableModel(AbstractTableModel):
                 # TODO maybe change this to returning the row and not private value index?
                 return str(messageEntry._index)
             elif columnIndex == 1:
-                # TODO maybe change this to full URL?
-                path = messageEntry._url.getPath()
-                query = messageEntry._url.getQuery()
-                return path+"?"+query if query else path
+                return messageEntry._name
             elif columnIndex == 2:
                 return messageEntry._successRegex
             else:
@@ -904,7 +901,9 @@ class MessageTableModel(AbstractTableModel):
         if self._db.lock.locked():
             return
         messageEntry = self._db.getMessageByRow(row)
-        if col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
+        if col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-2:
+            messageEntry._name = val
+        elif col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
             messageEntry._successRegex = val
         else:
             roleIndex = self._db.getRoleByMColumn(col)._index
@@ -914,7 +913,7 @@ class MessageTableModel(AbstractTableModel):
     # Set checkboxes editable
     def isCellEditable(self, row, col):
         # Include regex
-        if col >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
+        if col >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-2:
             return True
         return False
 
@@ -1028,11 +1027,12 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
 class MessageEntry:
 
-    def __init__(self, index, tableRow, requestResponse, url, roles = {}, regex = "^HTTP/1\\.1 200 OK", deleted = False):
+    def __init__(self, index, tableRow, requestResponse, url, name = "", roles = {}, regex = "^HTTP/1\\.1 200 OK", deleted = False):
         self._index = index
         self._tableRow = tableRow
         self._requestResponse = requestResponse
         self._url = url
+        self._name = url.getPath() if not name else name
         self._roles = roles.copy()
         self._successRegex = regex
         self._deleted = deleted
@@ -1135,7 +1135,7 @@ class MatrixDBData():
 # Used since the Burp RequestResponse object can not be serialized
 class MessageEntryData:
 
-    def __init__(self, index, tableRow, requestData, host, port, protocol, url, roles, successRegex, deleted):
+    def __init__(self, index, tableRow, requestData, host, port, protocol, url, name, roles, successRegex, deleted):
         self._index = index
         self._tableRow = tableRow
         self._requestData = requestData
@@ -1143,6 +1143,7 @@ class MessageEntryData:
         self._port = port
         self._protocol = protocol
         self._url = url
+        self._name = name
         self._roles = roles
         self._successRegex = successRegex
         self._deleted = deleted
