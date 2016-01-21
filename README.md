@@ -37,5 +37,5 @@ https://portswigger.net/burp/help/extender.html#options_pythonenv
 * Click Run to run all requests or right click several messages and select run.  Observe that the adjacent table will show color coded results, red indicating the request did not return expected results and may indicate a vulnerability.
 
 ![Sample AuthMatrix Configuration]
-(./img1.png)
+(img1.png)
 
