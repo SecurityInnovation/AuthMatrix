@@ -956,7 +956,11 @@ class MessageTable(JTable):
             self.redrawTable()
             return
 
-        self._extender._tabs.addTab("Original",self.createRequestTabs(selectedMessage._requestResponse))
+        # Create original Request tab and set default tab to Request
+        # Then Create test tabs and set the default tab to Response for easy analysis
+        originalTab = self.createRequestTabs(selectedMessage._requestResponse)
+        originalTab.setSelectedIndex(0)
+        self._extender._tabs.addTab("Original",originalTab)
         for userIndex in selectedMessage._userRuns.keys():
             if not self.getModel()._db.arrayOfUsers[userIndex].isDeleted():
                 tabname = str(self.getModel()._db.arrayOfUsers[userIndex]._name)
@@ -978,6 +982,7 @@ class MessageTable(JTable):
         requestViewer.setMessage(requestResponse.getRequest(), True)
         if requestResponse.getResponse():
             responseViewer.setMessage(requestResponse.getResponse(), False)
+            requestTabs.setSelectedIndex(1)
 
         return requestTabs
 
