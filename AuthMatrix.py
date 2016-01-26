@@ -397,6 +397,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self.clearColorResults(indexes)
             for index in indexes:
                 self.runMessage(index)
+                #self.colorCodeResults()
         except:
             traceback.print_exc(file=self._callbacks.getStderr())
         finally:
