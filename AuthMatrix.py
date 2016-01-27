@@ -72,7 +72,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.3")
+        callbacks.setExtensionName("AuthMatrix - v0.4")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -394,8 +394,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             indexes = messageIndexes
             if not indexes:
                 indexes = self._db.getActiveMessageIndexes()
+            self.clearColorResults(indexes)
             for index in indexes:
                 self.runMessage(index)
+                #self.colorCodeResults()
         except:
             traceback.print_exc(file=self._callbacks.getStderr())
         finally:
@@ -496,6 +498,17 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             messageEntry.setRoleResultByRoleIndex(roleIndex, success)
                     
     def colorCodeResults(self):
+        self._messageTable.redrawTable()
+
+    def clearColorResults(self, messageIndexArray = None):
+        if not messageIndexArray:
+            messageIndexes = self._db.getActiveMessageIndexes()
+        else:
+            messageIndexes = messageIndexArray
+        for messageIndex in messageIndexes:
+            messageEntry = self._db.arrayOfMessages[messageIndex]
+            messageEntry._roleResults = {}
+            messageEntry._userRuns = {}
         self._messageTable.redrawTable()
 
     def checkResult(self, messageEntry, roleIndex, activeSuccessRoles):
@@ -880,8 +893,7 @@ class MessageTableModel(AbstractTableModel):
         messageEntry = self._db.getMessageByRow(rowIndex)
         if messageEntry:
             if columnIndex == 0:
-                # TODO maybe change this to returning the row and not private value index?
-                return str(messageEntry._index)
+                return str(messageEntry.getTableRow())
             elif columnIndex == 1:
                 return messageEntry._name
             elif columnIndex == 2:
@@ -941,9 +953,15 @@ class MessageTable(JTable):
 
         # NOTE: testing if .locked is ok here since its a manual operation
         if self.getModel()._db.lock.locked():
+            # Provide some feedback on a click
+            self.redrawTable()
             return
 
-        self._extender._tabs.addTab("Original",self.createRequestTabs(selectedMessage._requestResponse))
+        # Create original Request tab and set default tab to Request
+        # Then Create test tabs and set the default tab to Response for easy analysis
+        originalTab = self.createRequestTabs(selectedMessage._requestResponse)
+        originalTab.setSelectedIndex(0)
+        self._extender._tabs.addTab("Original",originalTab)
         for userIndex in selectedMessage._userRuns.keys():
             if not self.getModel()._db.arrayOfUsers[userIndex].isDeleted():
                 tabname = str(self.getModel()._db.arrayOfUsers[userIndex]._name)
@@ -965,6 +983,7 @@ class MessageTable(JTable):
         requestViewer.setMessage(requestResponse.getRequest(), True)
         if requestResponse.getResponse():
             responseViewer.setMessage(requestResponse.getResponse(), False)
+            requestTabs.setSelectedIndex(1)
 
         return requestTabs
 
