@@ -1,4 +1,4 @@
-# AuthMatrix v0.3
+# AuthMatrix v0.4
 
 AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services.  It differentiates itself from several authorization testing extensions in that it focuses on the Pentester thoroughly defining tables of Users, Roles, and Requests for the specific target application upfront. These tables are displayed through the UI in a similar format to an access control matrix common in various threat modeling styles. 
 
