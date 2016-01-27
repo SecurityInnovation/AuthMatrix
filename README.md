@@ -18,6 +18,8 @@ AuthMatrix requires configuring Burp Suite to use Jython.  Easy instructions for
 
 https://portswigger.net/burp/help/extender.html#options_pythonenv
 
+Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
+
 # Usage
 
 * In AuthMatrix, create roles for all privilege levels within the target application.  Common roles may include User, Admin, and Anonymous.
