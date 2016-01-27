@@ -1,6 +1,6 @@
 # AuthMatrix v0.4
 
-AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services.  It differentiates itself from several authorization testing extensions in that it focuses on the Ppentester thoroughly defining tables of users, roles, and requests for the specific target application upfront. These tables are displayed through the UI in a similar format to an access control matrix common in various threat modeling styles. 
+AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services.  It differentiates itself from several authorization testing extensions in that it focuses on the pentester thoroughly defining tables of users, roles, and requests for the specific target application upfront. These tables are displayed through the UI in a similar format to an access control matrix common in various threat modeling styles. 
 
 Once the tables have been assembled, users can use the simple click-to-run interface to efficiently test all combinations of roles and can quickly confirm the results with an easy to read interface indicating any authorization vulnerabilities detected in the system.  
 
@@ -30,7 +30,7 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
 * In the second table of AuthMatrix, check all roles that are authorized to make each request.
 
-* Create a regex based on the expected response behavior of the request to determine if the action has suceeded. Common regexes include HTTP Response headers, success messages within the body, or other variations within the body of the page.
+* Create a regex based on the expected response behavior of the request to determine if the action has succeeded. Common regexes include HTTP Response headers, success messages within the body, or other variations within the body of the page.
 
 * Generate session tokens for each user via a web browser or the repeater tab and enter them into the correct field within the first table.
 
