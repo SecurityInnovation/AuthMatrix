@@ -1,6 +1,6 @@
 # AuthMatrix v0.4
 
-AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services.  It differentiates itself from several authorization testing extensions in that it focuses on the Pentester thoroughly defining tables of Users, Roles, and Requests for the specific target application upfront. These tables are displayed through the UI in a similar format to an access control matrix common in various threat modeling styles. 
+AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services.  It differentiates itself from several authorization testing extensions in that it focuses on the Ppentester thoroughly defining tables of users, roles, and requests for the specific target application upfront. These tables are displayed through the UI in a similar format to an access control matrix common in various threat modeling styles. 
 
 Once the tables have been assembled, users can use the simple click-to-run interface to efficiently test all combinations of roles and can quickly confirm the results with an easy to read interface indicating any authorization vulnerabilities detected in the system.  
 
@@ -12,7 +12,7 @@ AuthMatrix can be easily installed through the Burp Suite BApp Store. From withi
 
 For Manual installation, download AuthMatrix.py from this repository.  Then from within Burp Suite, select the Extender tab, click the Add button, change the Extension type to Python and select the AuthMatrix python file.
 
-## Note
+### Note
 
 AuthMatrix requires configuring Burp Suite to use Jython.  Easy instructions for this can be located at the following URL.
 
@@ -20,7 +20,7 @@ https://portswigger.net/burp/help/extender.html#options_pythonenv
 
 # Usage
 
-* In AuthMatrix, create roles for all privilege levels within the target application.  Common roles many include User, Admin, and Anonymous.
+* In AuthMatrix, create roles for all privilege levels within the target application.  Common roles may include User, Admin, and Anonymous.
 
 * Create users that fit these various roles and check all roles that the user belongs to.  If a user is part of multiple roles, check each role individually.
 
