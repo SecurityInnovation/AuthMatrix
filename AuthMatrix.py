@@ -25,6 +25,7 @@ from burp import IMessageEditorController
 from burp import IContextMenuFactory
 
 from java.awt import Component;
+from java.awt import GridLayout;
 from java.io import PrintWriter;
 from java.util import ArrayList;
 from java.util import List;
@@ -42,6 +43,7 @@ from javax.swing import JCheckBox;
 from javax.swing import JLabel;
 from javax.swing import JFileChooser;
 from javax.swing import JPopupMenu;
+from javax.swing import JTextField;
 from javax.swing.table import AbstractTableModel;
 from javax.swing.table import TableCellRenderer;
 from javax.swing.table import JTableHeader;
@@ -51,6 +53,7 @@ from java.awt.event import MouseListener;
 from java.awt.event import MouseAdapter;
 from java.awt.event import ActionListener;
 from javax.swing.border import MatteBorder;
+import java.lang;
 
 from org.python.core.util import StringUtil
 from threading import Lock
@@ -369,7 +372,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             dbData=ins.readObject()
             ins.close()
 
-            self._db.load(dbData,self._callbacks, self._helpers)
+            self._db.load(dbData,self)
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
 
@@ -383,6 +386,27 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         t = Thread(target=self.runMessagesThread)
         self._tabs.removeAll()
         t.start()
+
+    def changeDomainPopup(self, oldDomain, index):
+        hostField = JTextField(25)
+        checkbox = JCheckBox()
+        domainPanel = JPanel(GridLayout(0,1))
+        domainPanel.add(JLabel("Request %s: Domain %s inaccessible. Enter new domain." % (str(index),oldDomain)))
+
+        firstline = JPanel()
+        firstline.add(JLabel("Host:"))
+        firstline.add(hostField)
+        domainPanel.add(firstline)
+        secondline = JPanel()
+        secondline.add(JLabel("Replace domain for all requests?"))
+        secondline.add(checkbox)
+        domainPanel.add(secondline)
+        result = JOptionPane.showConfirmDialog(
+            self._splitpane,domainPanel, "Domain Inaccessible", JOptionPane.OK_CANCEL_OPTION)
+        cancelled = (result == JOptionPane.CANCEL_OPTION)
+        if cancelled:
+            return (False, None, False)
+        return (True, hostField.getText(), checkbox.isSelected())
 
     ##
     ## Methods for running messages and analyzing results
@@ -627,16 +651,32 @@ class MatrixDB():
         self.deletedMessageCount = 0
         self.lock.release()
 
-    def load(self, db, callbacks, helpers):
+    def load(self, db, extender):
         def loadRequestResponse(index, callbacks, helpers, host, port, protocol, requestData):
             # TODO tempRequestResont is now an array
             # because of a timing issue, where if this thread times out, it will still update temprequestresponse later on..
             # TODO also this still locks the UI until all requests suceed or time out...
             try:
                 # Due to Burp Extension API, must create a original request for all messages
-                self.tempRequestResponse[index] = callbacks.makeHttpRequest(helpers.buildHttpService(host, port, protocol),requestData)
+                service = helpers.buildHttpService(host, port, protocol)
+                if service:
+                    self.tempRequestResponse[index] = callbacks.makeHttpRequest(service,requestData)
+            except java.lang.RuntimeException:
+                # TODO catches if there is a bad host
+                # TODO there is an unhandled exception thrown in the stack trace here?
+                #print "Here"
+                return
             except:
                 traceback.print_exc(file=callbacks.getStderr())
+
+        def replaceDomain(requestData, oldDomain, newDomain):
+            reqstr = StringUtil.fromBytes(requestData)
+            reqstr = reqstr.replace(oldDomain, newDomain)
+            newreq = StringUtil.toBytes(reqstr)
+            return newreq
+
+        callbacks = extender._callbacks
+        helpers = extender._helpers
 
         self.lock.acquire()
         self.arrayOfRoles = db.arrayOfRoles
@@ -648,19 +688,42 @@ class MatrixDB():
 
         self.tempRequestResponse = []
         index=0
+        newDomain = None
+        replaceForAll = False
+        skipped = 0
         for message in db.arrayOfMessages: 
-            self.tempRequestResponse.append(None)
-            t = Thread(target=loadRequestResponse, args = [index, callbacks, helpers, message._host, message._port, message._protocol, message._requestData])
-            t.start()
-            # TODO fix timeout here to be non-static
-            t.join(2.0)
-            if not t.isAlive() and self.tempRequestResponse[index] != None:
-                self.arrayOfMessages.append(MessageEntry(
-                    message._index,
-                    message._tableRow,
-                    callbacks.saveBuffersToTempFiles(self.tempRequestResponse[index]),
-                    message._url, message._name, message._roles, message._successRegex, message._deleted))
-            index += 1
+            keeptrying = True
+            while keeptrying:
+                self.tempRequestResponse.append(None)
+
+                if newDomain:
+                    requestData = replaceDomain(message._requestData, message._host, newDomain)
+                    host = newDomain
+                    # TODO consider changing port too?
+                else:
+                    requestData = message._requestData
+                    host = message._host
+
+                t = Thread(target=loadRequestResponse, args = [index, callbacks, helpers, host, message._port, message._protocol, requestData])
+                t.start()
+                # TODO fix timeout here to be non-static
+                t.join(2.0)
+                if not t.isAlive() and self.tempRequestResponse[index] != None:
+                    self.arrayOfMessages.append(MessageEntry(
+                        message._index,
+                        message._tableRow-skipped,
+                        callbacks.saveBuffersToTempFiles(self.tempRequestResponse[index]),
+                        message._url, message._name, message._roles, message._successRegex, message._deleted))
+                    keeptrying = False
+                    if not replaceForAll:
+                        newDomain = None
+                else:
+                    keeptrying, newDomain, replaceForAll = extender.changeDomainPopup(host, message._tableRow)
+                    if not keeptrying:
+                        skipped += 1
+                    
+                index += 1
+
         self.lock.release()
 
     
