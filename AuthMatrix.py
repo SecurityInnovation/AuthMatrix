@@ -20,15 +20,15 @@
 
 from burp import IBurpExtender
 from burp import ITab
-from burp import IHttpListener
+from burp import IHttpListener # TODO Remove?
 from burp import IMessageEditorController
 from burp import IContextMenuFactory
 
 from java.awt import Component;
 from java.awt import GridLayout;
-from java.io import PrintWriter;
+from java.io import PrintWriter; # TODO Remove?
 from java.util import ArrayList;
-from java.util import List;
+from java.util import List; # TODO Remove?
 from java.lang import Boolean;
 from javax.swing import JScrollPane;
 from javax.swing import JSplitPane;
@@ -37,7 +37,7 @@ from javax.swing import JPanel;
 from javax.swing import JButton;
 from javax.swing import JTable;
 from javax.swing import JOptionPane;
-from javax.swing import SwingUtilities;
+from javax.swing import SwingUtilities; # TODO Remove?
 from javax.swing import JMenuItem;
 from javax.swing import JCheckBox;
 from javax.swing import JLabel;
@@ -48,11 +48,11 @@ from javax.swing.table import AbstractTableModel;
 from javax.swing.table import TableCellRenderer;
 from javax.swing.table import JTableHeader;
 from java.awt import Color;
-from javax.swing.plaf import UIResource;
-from java.awt.event import MouseListener;
+from javax.swing.plaf import UIResource; # TODO Remove?
+from java.awt.event import MouseListener; # TODO Remove?
 from java.awt.event import MouseAdapter;
 from java.awt.event import ActionListener;
-from javax.swing.border import MatteBorder;
+from javax.swing.border import MatteBorder; # TODO Remove?
 import java.lang;
 
 from org.python.core.util import StringUtil
@@ -571,6 +571,7 @@ class MatrixDB():
         # TODO: consider moving these constants to a different class
         self.STATIC_USER_TABLE_COLUMN_COUNT = 3
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
+        self.LOAD_TIMEOUT = 3.0
 
         self.lock = Lock()
         self.arrayOfMessages = ArrayList()
@@ -708,8 +709,7 @@ class MatrixDB():
 
                 t = Thread(target=loadRequestResponse, args = [index, callbacks, helpers, host, message._port, message._protocol, requestData])
                 t.start()
-                # TODO fix timeout here to be non-static
-                t.join(2.0)
+                t.join(self.LOAD_TIMEOUT)
                 if not t.isAlive() and self.tempRequestResponse[index] != None:
                     self.arrayOfMessages.append(MessageEntry(
                         message._index,
@@ -1206,14 +1206,14 @@ class RoleEntry:
 # Used to store Database to Disk on Save and Load
 class MatrixDBData():
 
-    def __init__(self, m, r, u, cu, cr, cm):
+    def __init__(self, arrayOfMessages, arrayOfRoles, arrayOfUsers, deletedUserCount, deletedRoleCount, deletedMessageCount):
         
-        self.arrayOfMessages = m
-        self.arrayOfRoles = r
-        self.arrayOfUsers = u
-        self.deletedUserCount = cu
-        self.deletedRoleCount = cr
-        self.deletedMessageCount = cm
+        self.arrayOfMessages = arrayOfMessages
+        self.arrayOfRoles = arrayOfRoles
+        self.arrayOfUsers = arrayOfUsers
+        self.deletedUserCount = deletedUserCount
+        self.deletedRoleCount = deletedRoleCount
+        self.deletedMessageCount = deletedMessageCount
 
 # Serializable MessageEntry
 # Used since the Burp RequestResponse object can not be serialized
