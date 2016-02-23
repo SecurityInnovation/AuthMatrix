@@ -71,7 +71,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.4")
+        callbacks.setExtensionName("AuthMatrix - v0.5")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()

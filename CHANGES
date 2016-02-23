@@ -1,0 +1,13 @@
+v0.5 - 02/23/2016
+
+STATE FILE COMPATIBILITY - v0.4 and greater
+
+* FEATURE: Changing host domains on load when they are unaccessible 
+* Cleaned up variable names 
+* Removed "Send to AuthMatrix" for Target Trees due to bugginess
+* Removed unused libraries from code
+* Add confirmation for Clear
+* Changed load timeout to 3.0 seconds
+
+
+
