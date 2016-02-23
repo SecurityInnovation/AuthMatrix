@@ -379,10 +379,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._messageTable.redrawTable()
 
     def clearClick(self,e):
-        self._db.clear()
-        self._tabs.removeAll()
-        self._userTable.redrawTable()
-        self._messageTable.redrawTable()
+        result = JOptionPane.showConfirmDialog(self._splitpane, "Clear AuthMatrix Configuration?", "Clear Config", JOptionPane.YES_NO_OPTION)
+        if result == JOptionPane.YES_OPTION:
+            self._db.clear()
+            self._tabs.removeAll()
+            self._userTable.redrawTable()
+            self._messageTable.redrawTable()
 
     def runClick(self,e):
         t = Thread(target=self.runMessagesThread)
