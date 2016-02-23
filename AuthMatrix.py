@@ -20,15 +20,16 @@
 
 from burp import IBurpExtender
 from burp import ITab
-from burp import IHttpListener # TODO Remove?
 from burp import IMessageEditorController
 from burp import IContextMenuFactory
 
 from java.awt import Component;
 from java.awt import GridLayout;
-from java.io import PrintWriter; # TODO Remove?
+from java.io import ObjectOutputStream;
+from java.io import FileOutputStream;
+from java.io import ObjectInputStream;
+from java.io import FileInputStream;
 from java.util import ArrayList;
-from java.util import List; # TODO Remove?
 from java.lang import Boolean;
 from javax.swing import JScrollPane;
 from javax.swing import JSplitPane;
@@ -37,7 +38,6 @@ from javax.swing import JPanel;
 from javax.swing import JButton;
 from javax.swing import JTable;
 from javax.swing import JOptionPane;
-from javax.swing import SwingUtilities; # TODO Remove?
 from javax.swing import JMenuItem;
 from javax.swing import JCheckBox;
 from javax.swing import JLabel;
@@ -48,11 +48,8 @@ from javax.swing.table import AbstractTableModel;
 from javax.swing.table import TableCellRenderer;
 from javax.swing.table import JTableHeader;
 from java.awt import Color;
-from javax.swing.plaf import UIResource; # TODO Remove?
-from java.awt.event import MouseListener; # TODO Remove?
 from java.awt.event import MouseAdapter;
 from java.awt.event import ActionListener;
-from javax.swing.border import MatteBorder; # TODO Remove?
 import java.lang;
 
 from org.python.core.util import StringUtil
@@ -60,7 +57,6 @@ from threading import Lock
 from threading import Thread
 import traceback
 import re
-from java import io
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
     
@@ -347,7 +343,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if result != JOptionPane.YES_OPTION:
                     return
             fileName = f.getPath()
-            outs = io.ObjectOutputStream(io.FileOutputStream(fileName))
+            outs = ObjectOutputStream(FileOutputStream(fileName))
             outs.writeObject(self._db.getSaveableObject())
             outs.close()
 
@@ -369,7 +365,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             f = self._fc.getSelectedFile()
             fileName = f.getPath()
             
-            ins = io.ObjectInputStream(io.FileInputStream(fileName))
+            ins = ObjectInputStream(FileInputStream(fileName))
             dbData=ins.readObject()
             ins.close()
 
