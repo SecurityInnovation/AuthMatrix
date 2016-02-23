@@ -279,7 +279,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     ##
 
     def createMenuItems(self, invocation):
-        messages = invocation.getSelectedMessages()
 
         def addRequestsToTab(e):
             for messageInfo in messages:
@@ -289,11 +288,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 #self._messageTable.getModel().addRow(row)
             self._messageTable.redrawTable()
 
-        ret = []
-        menuItem = JMenuItem("Send request(s) to AuthMatrix");
-        menuItem.addActionListener(addRequestsToTab)
-        ret.append(menuItem)
-        return(ret)
+        # TODO support target site map tree if its an actual request, not a dir (like how repeater supports it)
+        if invocation.getInvocationContext() != invocation.CONTEXT_TARGET_SITE_MAP_TREE:
+            messages = invocation.getSelectedMessages()
+            ret = []
+            menuItem = JMenuItem("Send request(s) to AuthMatrix");
+            menuItem.addActionListener(addRequestsToTab)
+            ret.append(menuItem)
+            return(ret)
 
     
     ##
