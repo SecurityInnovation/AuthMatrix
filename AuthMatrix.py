@@ -159,19 +159,18 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._userTable.redrawTable()
 
         # TODO combine these next two classes
-        # TODO Also, clean up the variable names where M and U are in place of MessageTable and UserTable
-        class actionRemoveRoleHeaderFromM(ActionListener):
+        class actionRemoveRoleHeaderFromMessageTable(ActionListener):
             def actionPerformed(self,e):
                 if selfExtender._selectedColumn >= 0:
-                    selfExtender._db.deleteRole(selfExtender._db.getRoleByMColumn(selfExtender._selectedColumn)._index)
+                    selfExtender._db.deleteRole(selfExtender._db.getRoleByMessageTableColumn(selfExtender._selectedColumn)._index)
                     selfExtender._selectedColumn = -1
                     selfExtender._userTable.redrawTable()
                     selfExtender._messageTable.redrawTable()
 
-        class actionRemoveRoleHeaderFromU(ActionListener):
+        class actionRemoveRoleHeaderFromUserTable(ActionListener):
             def actionPerformed(self,e):
                 if selfExtender._selectedColumn >= 0:
-                    selfExtender._db.deleteRole(selfExtender._db.getRoleByUColumn(selfExtender._selectedColumn)._index)
+                    selfExtender._db.deleteRole(selfExtender._db.getRoleByUserTableColumn(selfExtender._selectedColumn)._index)
                     selfExtender._selectedColumn = -1
                     selfExtender._userTable.redrawTable()
                     selfExtender._messageTable.redrawTable()
@@ -189,9 +188,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         messageHeaderPopup = JPopupMenu()
         addPopup(self._messageTable.getTableHeader(),messageHeaderPopup)
-        roleRemoveFromM = JMenuItem("Remove Role")
-        roleRemoveFromM.addActionListener(actionRemoveRoleHeaderFromM())
-        messageHeaderPopup.add(roleRemoveFromM)
+        roleRemoveFromMessageTable = JMenuItem("Remove Role")
+        roleRemoveFromMessageTable.addActionListener(actionRemoveRoleHeaderFromMessageTable())
+        messageHeaderPopup.add(roleRemoveFromMessageTable)
 
         # User Table popup
         userPopup = JPopupMenu()
@@ -202,9 +201,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         userHeaderPopup = JPopupMenu()
         addPopup(self._userTable.getTableHeader(),userHeaderPopup)
-        roleRemoveFromU = JMenuItem("Remove Role")
-        roleRemoveFromU.addActionListener(actionRemoveRoleHeaderFromU())
-        userHeaderPopup.add(roleRemoveFromU)
+        roleRemoveFromUserTable = JMenuItem("Remove Role")
+        roleRemoveFromUserTable.addActionListener(actionRemoveRoleHeaderFromUserTable())
+        userHeaderPopup.add(roleRemoveFromUserTable)
 
         # Top pane
         topPane = JSplitPane(JSplitPane.VERTICAL_SPLIT,roleScrollPane,messageScrollPane)
@@ -667,9 +666,8 @@ class MatrixDB():
                 if service:
                     self.tempRequestResponse[index] = callbacks.makeHttpRequest(service,requestData)
             except java.lang.RuntimeException:
-                # TODO catches if there is a bad host
+                # Catches if there is a bad host
                 # TODO there is an unhandled exception thrown in the stack trace here?
-                #print "Here"
                 return
             except:
                 traceback.print_exc(file=callbacks.getStderr())
@@ -768,12 +766,12 @@ class MatrixDB():
             if not u.isDeleted() and u.getTableRow() == row:
                 return u
 
-    def getRoleByMColumn(self, column):
+    def getRoleByMessageTableColumn(self, column):
         for r in self.arrayOfRoles:
             if not r.isDeleted() and r.getMTableColumn() == column:
                 return r
 
-    def getRoleByUColumn(self, column):
+    def getRoleByUserTableColumn(self, column):
         for r in self.arrayOfRoles:
             if not r.isDeleted() and r.getUTableColumn() == column:
                 return r
@@ -847,7 +845,7 @@ class UserTableModel(AbstractTableModel):
         elif columnIndex == 2:
             return "(Optional) CSRF Token"
         else:
-            roleEntry = self._db.getRoleByUColumn(columnIndex)
+            roleEntry = self._db.getRoleByUserTableColumn(columnIndex)
             if roleEntry:
                 return roleEntry._name
         return ""
@@ -862,7 +860,7 @@ class UserTableModel(AbstractTableModel):
             elif columnIndex == 2:
                 return userEntry._staticcsrf
             else:
-                roleEntry = self._db.getRoleByUColumn(columnIndex)
+                roleEntry = self._db.getRoleByUserTableColumn(columnIndex)
                 if roleEntry:
                     roleIndex = roleEntry._index
                     return roleIndex in userEntry._roles and userEntry._roles[roleIndex]
@@ -884,7 +882,7 @@ class UserTableModel(AbstractTableModel):
             elif col == 2:
                 userEntry._staticcsrf = val
             else:
-                roleIndex = self._db.getRoleByUColumn(col)._index
+                roleIndex = self._db.getRoleByUserTableColumn(col)._index
                 userEntry.addRoleByIndex(roleIndex, val)
 
         self.fireTableCellUpdated(row,col)
@@ -951,7 +949,7 @@ class MessageTableModel(AbstractTableModel):
         elif columnIndex == 2:
             return "Success Regex"
         else:
-            roleEntry = self._db.getRoleByMColumn(columnIndex)
+            roleEntry = self._db.getRoleByMessageTableColumn(columnIndex)
             if roleEntry:
                 return roleEntry._name
         return ""
@@ -966,7 +964,7 @@ class MessageTableModel(AbstractTableModel):
             elif columnIndex == 2:
                 return messageEntry._successRegex
             else:
-                roleEntry = self._db.getRoleByMColumn(columnIndex)
+                roleEntry = self._db.getRoleByMessageTableColumn(columnIndex)
                 if roleEntry:
                     roleIndex = roleEntry._index
                     return roleIndex in messageEntry._roles and messageEntry._roles[roleIndex]
@@ -985,7 +983,7 @@ class MessageTableModel(AbstractTableModel):
         elif col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
             messageEntry._successRegex = val
         else:
-            roleIndex = self._db.getRoleByMColumn(col)._index
+            roleIndex = self._db.getRoleByMessageTableColumn(col)._index
             messageEntry.addRoleByIndex(roleIndex,val)
         self.fireTableCellUpdated(row,col)
 
@@ -1090,7 +1088,7 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
         if column >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT:
             messageEntry = self._db.getMessageByRow(row)
             if messageEntry:
-                roleEntry = self._db.getRoleByMColumn(column)
+                roleEntry = self._db.getRoleByMessageTableColumn(column)
                 if roleEntry:
                     roleIndex = roleEntry._index
                     if not roleIndex in messageEntry._roleResults:
