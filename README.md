@@ -1,10 +1,8 @@
 # AuthMatrix v0.5
 
-AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services.  It differentiates itself from several authorization testing extensions in that it focuses on the pentester thoroughly defining tables of users, roles, and requests for the specific target application upfront. These tables are displayed through the UI in a similar format to an access control matrix common in various threat modeling styles. 
+AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services. With AuthMatrix, testers focus on thoroughly defining tables of users, roles, and requests for their specific target application upfront. These tables are displayed through the UI in a similar format to that of an access control matrix commonly built in various threat modeling methodologies.
 
-Once the tables have been assembled, users can use the simple click-to-run interface to efficiently test all combinations of roles and can quickly confirm the results with an easy to read interface indicating any authorization vulnerabilities detected in the system.  
-
-AuthMatrix is designed with an intuitive UI to make authorization testing simple and easy to integrate into your current testing methodology. Additionally, the extension provides the ability to save and load target configurations for easy regression testing. 
+Once the tables have been assembled, testers can use the simple click-to-run interface to efficiently run all combinations of roles and requests. Testers can then confirm their results with an easy to read, color-coded interface indicating any authorization vulnerabilities detected in the system. Additionally, the extension provides the ability to save and load target configurations for simple regression testing.
 
 # Installation
 
@@ -36,7 +34,7 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
 * OPTIONAL: If the target application uses user-specific reusable CSRF tokens, enter them into the correct field within the first table. Advanced CSRF protection handling is not currently supported in AuthMatrix.
 
-* Click Run to run all requests or right click several messages and select run.  Observe that the adjacent table will show color coded results, red indicating the request did not return expected results and may indicate a vulnerability.
+* Click Run to run all requests or right click several messages and select run.  Observe that the adjacent table will show color-coded results, red indicating the request did not return expected results and may indicate a vulnerability.
 
 ![Sample AuthMatrix Configuration]
 (img1.png)
