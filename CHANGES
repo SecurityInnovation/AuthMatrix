@@ -1,3 +1,9 @@
+v0.5.1 - 03/21/2016
+
+STATE FILE COMPATIBILITY - v0.4 and greater
+
+* Small Bug Fix: replace .append with .add on Java ArrayList types. Not sure why .append ever worked on certain systems to begin with...
+
 v0.5 - 02/23/2016
 
 STATE FILE COMPATIBILITY - v0.4 and greater

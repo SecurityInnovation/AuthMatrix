@@ -71,7 +71,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.5")
+        callbacks.setExtensionName("AuthMatrix - v0.5.1")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -589,7 +589,7 @@ class MatrixDB():
         # Add new User
         if userIndex < 0:
             userIndex = self.arrayOfUsers.size()
-            self.arrayOfUsers.append(UserEntry(userIndex,
+            self.arrayOfUsers.add(UserEntry(userIndex,
                 userIndex - self.deletedUserCount,
                 name, token))
 
@@ -611,7 +611,7 @@ class MatrixDB():
         # Add new Role
         if roleIndex < 0:
             roleIndex = self.arrayOfRoles.size()
-            self.arrayOfRoles.append(RoleEntry(roleIndex,
+            self.arrayOfRoles.add(RoleEntry(roleIndex,
                 roleIndex + self.STATIC_MESSAGE_TABLE_COLUMN_COUNT - self.deletedRoleCount,
                 roleIndex + self.STATIC_USER_TABLE_COLUMN_COUNT - self.deletedRoleCount,
                 role))
@@ -707,7 +707,7 @@ class MatrixDB():
                 t.start()
                 t.join(self.LOAD_TIMEOUT)
                 if not t.isAlive() and self.tempRequestResponse[index] != None:
-                    self.arrayOfMessages.append(MessageEntry(
+                    self.arrayOfMessages.add(MessageEntry(
                         message._index,
                         message._tableRow-skipped,
                         callbacks.saveBuffersToTempFiles(self.tempRequestResponse[index]),
