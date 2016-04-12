@@ -71,7 +71,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.5.1")
+        callbacks.setExtensionName("AuthMatrix - v0.5.2")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -283,21 +283,25 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 #self._messageTable.getModel().addRow(row)
             self._messageTable.redrawTable()
 
-        # TODO support target site map tree if its an actual request, not a dir (like how repeater supports it)
-        if invocation.getInvocationContext() != invocation.CONTEXT_TARGET_SITE_MAP_TREE:
-            messages = invocation.getSelectedMessages()
-            ret = []
+        ret = []
+        messages = invocation.getSelectedMessages()
+
+        # Check if the messages in the target tree have a response
+        valid = True
+        if invocation.getInvocationContext() == invocation.CONTEXT_TARGET_SITE_MAP_TREE:
+            for selected in messages:
+                if not selected.getResponse():
+                    valid = False
+
+        if valid:
             menuItem = JMenuItem("Send request(s) to AuthMatrix");
             menuItem.addActionListener(addRequestsToTab)
             ret.append(menuItem)
-            return(ret)
-
+        return ret
     
     ##
     ## implement IMessageEditorController
     ## this allows our request/response viewers to obtain details about the messages being displayed
-    ##
-    ## TODO: Is this necessary? The request viewers may not require this since they aren't editable
     ##
 
     def getHttpService(self):
@@ -1029,6 +1033,8 @@ class MessageTable(JTable):
                 self._extender._tabs.addTab(tabname,self.createRequestTabs(selectedMessage._userRuns[userIndex]))
                 
         # TODO: do this on a tab change on extender._tabs: I think its needed for sending to repeater and comparer
+        # WEIRD: I think this should make it so that only the original can be sent to places
+        # However, it looks like it is working as expected... ???
         self._extender._currentlyDisplayedItem = selectedMessage._requestResponse
         JTable.changeSelection(self, row, col, toggle, extend)
         return
