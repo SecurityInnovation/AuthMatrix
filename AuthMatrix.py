@@ -626,7 +626,7 @@ class MatrixDB():
 
             # Add new role to each existing message as unchecked
             for messageIndex in self.getActiveMessageIndexes():
-                self.arrayOfMessages[messageIndex].addRoleByIndex(userIndex)
+                self.arrayOfMessages[messageIndex].addRoleByIndex(roleIndex)
 
         self.lock.release()
         return roleIndex
@@ -1127,8 +1127,8 @@ class MessageEntry:
         return
 
     # Role are the index of the db Role array and a bool for whether the checkbox is default enabled or not
-    def addRoleByIndex(self,userIndex,enabled=False):
-        self._roles[userIndex] = enabled;
+    def addRoleByIndex(self,roleIndex,enabled=False):
+        self._roles[roleIndex] = enabled;
 
     # Add one Run Result of user x message
     def addRunByUserIndex(self,userIndex,requestResponse):
