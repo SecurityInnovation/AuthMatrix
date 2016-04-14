@@ -431,6 +431,55 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._db.lock.release()
             self.colorCodeResults()
 
+    # Replaces headers/cookies with user's token
+    def getNewHeader(self, requestInfo, userEntry):
+        headers = requestInfo.getHeaders()
+        if userEntry.isCookie():
+            cookieHeader = "Cookie:"
+            newheader = cookieHeader
+            previousCookies = []
+            # note: getHeaders has to be called again here cuz of java references
+            for header in requestInfo.getHeaders():
+                # Find and remove existing cookie header
+                if str(header).startswith(cookieHeader):
+                    previousCookies = str(header)[len(cookieHeader):].replace(" ","").split(";")
+                    headers.remove(header)
+
+            newCookies = userEntry._token.replace(" ","").split(";")
+            newCookieVariableNames = []
+            for newCookie in newCookies:
+                # If its a valid cookie
+                equalsToken = newCookie.find("=")
+                if equalsToken >= 0:
+                    newCookieVariableNames.append(newCookie[0:equalsToken+1])
+
+            # Add all the old unchanged cookies
+            for previousCookie in previousCookies:
+                # If its a valid cookie
+                equalsToken = previousCookie.find("=")
+                if equalsToken >= 0:
+                    if previousCookie[0:equalsToken+1] not in newCookieVariableNames:
+                        newCookies.append(previousCookie)
+
+            # Remove whitespace
+            newCookies = [x for x in newCookies if x]
+            newheader = cookieHeader+" "+";".join(newCookies)
+
+        else:
+            # TODO: Support multiple headers with a newline somehow
+            newheader = userEntry._token
+            # Remove previous HTTP Header
+            colon = newheader.find(":")
+            if colon >= 0:
+                # getHeaders has to be called again here cuz of java references
+                for header in requestInfo.getHeaders():
+                    # If the header already exists, remove it
+                    if str(header).startswith(newheader[0:colon+1]):
+                        headers.remove(header)
+        headers.add(newheader)
+        return headers
+
+
     # TODO: This method is too large. Fix that
     def runMessage(self, messageIndex):
         messageEntry = self._db.arrayOfMessages[messageIndex]
@@ -443,49 +492,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         reqBody = messageInfo.getRequest()[requestInfo.getBodyOffset():]
         for userIndex in self._db.getActiveUserIndexes():
             userEntry = self._db.arrayOfUsers[userIndex]
-            headers = requestInfo.getHeaders()
-            if userEntry.isCookie():
-                cookieHeader = "Cookie:"
-                newheader = cookieHeader
-                # getHeaders has to be called again here cuz of java references
-                for header in requestInfo.getHeaders():
-                    if str(header).startswith(cookieHeader):
-                        newheader = str(header).strip()
-                        headers.remove(header)
-
-                # If its a valid cookie
-                equals = userEntry._token.find("=")
-                if equals >= 0:
-                    cookieIndex = newheader.find(userEntry._token[0:equals+1])
-                    # Cookie already exists and must be removed
-                    if cookieIndex >= 0:
-                        semicolon = newheader.find(";",cookieIndex)
-                        if semicolon >=0:
-                            # Remove extra whitespace
-                            if newheader[semicolon+1:semicolon+2] == " ":
-                                newheader = newheader.replace(newheader[cookieIndex:semicolon+2],"")
-                            else:
-                                newheader = newheader.replace(newheader[cookieIndex:semicolon+1],"")
-                        else:
-                            newheader = newheader.replace(newheader[cookieIndex:],"")
-                        # Removing tailing semicolon and white space
-                        newheader = newheader.rstrip("; ")
-                # Handle when the only cookie is the target cookie
-                if not newheader == cookieHeader:
-                    newheader += ";"
-                newheader += " "+userEntry._token
-
-            # Header
-            else:
-                newheader = userEntry._token
-                colon = newheader.find(":")
-                if colon >= 0:
-                    # getHeaders has to be called again here cuz of java references
-                    for header in requestInfo.getHeaders():
-                        if str(header).startswith(newheader[0:colon+1]):
-                            headers.remove(header)
-
-            headers.add(newheader)
+            headers = self.getNewHeader(requestInfo, userEntry)
 
             # Add static CSRF token if available
             # TODO: Kinda hacky, but for now it will add the token as long as there is some content in the post body
@@ -509,8 +516,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                                 print "Cookie CSRF Tokens are not currently supported"
                     if newBody == reqBody:
                         newBody = reqBody+StringUtil.toBytes("&"+userEntry._staticcsrf)
-
-
 
             # Construct and send a message with the new headers
             message = self._helpers.buildHttpMessage(headers, newBody)
