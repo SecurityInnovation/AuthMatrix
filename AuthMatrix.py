@@ -203,11 +203,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         # Top pane
         topPane = JSplitPane(JSplitPane.VERTICAL_SPLIT,roleScrollPane,messageScrollPane)
-        topPane.setResizeWeight(0.3)
 
         # request tabs added to this tab on click in message table
         self._tabs = JTabbedPane()
-
 
         # Button pannel
         buttons = JPanel()
@@ -227,12 +225,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         buttons.add(clearButton)
 
         bottomPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, self._tabs, buttons)
-        bottomPane.setResizeWeight(0.95)
 
         # Main Pane
         self._splitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT, topPane, bottomPane)
-        self._splitpane.setResizeWeight(0.5)
-
+        
 
 
         # customize our UI components
@@ -245,6 +241,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         callbacks.customizeUiComponent(self._userTable)
         callbacks.customizeUiComponent(self._tabs)
         callbacks.customizeUiComponent(buttons)
+
+        self._splitpane.setResizeWeight(0.5)
+        topPane.setResizeWeight(0.3)
+        bottomPane.setResizeWeight(0.95)
+
 
         # Handles checkbox color coding
         # Must be bellow the customizeUiComponent calls
