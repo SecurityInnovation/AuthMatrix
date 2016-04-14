@@ -2,8 +2,8 @@ v0.5.2 - 04/13/2016
 
 STATE FILE COMPATIBILITY - v0.5.2
 
-* MAJOR BUG FIX: Issue when adding new roles after messages have already been added.  Could lead to invalid results and incorrect UI display of the Message table's checkboxes. Invalidates some previous saved states.  
-* Re-enabled "Send from Target Map Tree" when messages have responses
+* MAJOR BUG FIX: Issue when adding new roles after messages have already been sent to AuthMatrix.  Could lead to invalid results and incorrect UI display of the Message table's checkboxes. Invalidates some previous saved states.  
+* Re-enabled "Send from Target Map Tree" when the selected messages all have responses
 * Refactored runMessage code and added support for multiple cookies in the session tokens
 
 v0.5.1 - 03/21/2016

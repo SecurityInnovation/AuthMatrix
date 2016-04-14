@@ -480,8 +480,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         headers.add(newheader)
         return headers
 
-
-    # TODO: This method is too large. Fix that
     def runMessage(self, messageIndex):
         messageEntry = self._db.arrayOfMessages[messageIndex]
         # Clear Previous Results:
