@@ -433,9 +433,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self.colorCodeResults()
 
     # Replaces headers/cookies with user's token
-    def getNewHeader(self, requestInfo, userEntry):
+    def getNewHeader(self, requestInfo, token, isCookie):
         headers = requestInfo.getHeaders()
-        if userEntry.isCookie():
+        if isCookie:
             cookieHeader = "Cookie:"
             newheader = cookieHeader
             previousCookies = []
@@ -446,7 +446,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     previousCookies = str(header)[len(cookieHeader):].replace(" ","").split(";")
                     headers.remove(header)
 
-            newCookies = userEntry._token.replace(" ","").split(";")
+            newCookies = token.replace(" ","").split(";")
             newCookieVariableNames = []
             for newCookie in newCookies:
                 # If its a valid cookie
@@ -468,7 +468,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         else:
             # TODO: Support multiple headers with a newline somehow
-            newheader = userEntry._token
+            newheader = token
             # Remove previous HTTP Header
             colon = newheader.find(":")
             if colon >= 0:
@@ -491,7 +491,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         reqBody = messageInfo.getRequest()[requestInfo.getBodyOffset():]
         for userIndex in self._db.getActiveUserIndexes():
             userEntry = self._db.arrayOfUsers[userIndex]
-            headers = self.getNewHeader(requestInfo, userEntry)
+            headers = self.getNewHeader(requestInfo, userEntry._token, userEntry.isCookie())
 
             # Add static CSRF token if available
             # TODO: Kinda hacky, but for now it will add the token as long as there is some content in the post body
@@ -508,11 +508,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             # Handle CSRF Tokens in Body
                             if param.getType() == 1:
                                 newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
-                            # Handle CSRF Tokens in Cookies (for Cookie==Body mitigation technique):
-                            if param.getType() == 2:
-                                # TODO: required moving above portion to a function
-                                # TODO: also need to think about when cookie name != postarg name
-                                print "Cookie CSRF Tokens are not currently supported"
                     if newBody == reqBody:
                         newBody = reqBody+StringUtil.toBytes("&"+userEntry._staticcsrf)
 
@@ -573,7 +568,7 @@ class MatrixDB():
 
     def __init__(self):
         # Holds all custom data
-        # TODO: consider moving these constants to a different class
+        # NOTE: consider moving these constants to a different class
         self.STATIC_USER_TABLE_COLUMN_COUNT = 3
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.LOAD_TIMEOUT = 3.0
@@ -661,7 +656,7 @@ class MatrixDB():
 
     def load(self, db, extender):
         def loadRequestResponse(index, callbacks, helpers, host, port, protocol, requestData):
-            # TODO tempRequestResont is now an array
+            # NOTE tempRequestResont is now an array
             # because of a timing issue, where if this thread times out, it will still update temprequestresponse later on..
             # TODO also this still locks the UI until all requests suceed or time out...
             try:
@@ -735,7 +730,7 @@ class MatrixDB():
     
 
     def getSaveableObject(self):
-        # TODO: might not need locks?
+        # NOTE: might not need locks?
         self.lock.acquire()
         serializedMessages = []
         for message in self.arrayOfMessages:
@@ -814,7 +809,7 @@ class MatrixDB():
                     i._tableRow -= 1
         self.lock.release()
 
-    # TODO: If this method is unused, probably remove it?
+    # NOTE: If this method is unused, probably remove it?
     def getUserEntriesWithinRole(self, roleIndex):
         return [userEntry for userEntry in self.arrayOfUsers if userEntry._roles[roleIndex]]
 
@@ -835,7 +830,7 @@ class UserTableModel(AbstractTableModel):
             return 0
 
     def getColumnCount(self):
-        # TODO maybe remove this try?
+        # NOTE maybe remove this try?
         try:
             return len(self._db.getActiveRoleIndexes())+self._db.STATIC_USER_TABLE_COLUMN_COUNT
         except:
@@ -1050,7 +1045,7 @@ class MessageTable(JTable):
         requestTabs.addTab("Request", requestViewer.getComponent())
         requestTabs.addTab("Response", responseViewer.getComponent())
         self._extender._callbacks.customizeUiComponent(requestTabs)
-        # TODO: consider adding the results when clicking the tab (lazy instantiation) since it can get slow
+        # NOTE: consider adding the results when clicking the tab (lazy instantiation) since it can get slow
         requestViewer.setMessage(requestResponse.getRequest(), True)
         if requestResponse.getResponse():
             responseViewer.setMessage(requestResponse.getResponse(), False)
@@ -1139,7 +1134,7 @@ class MessageEntry:
         self._userRuns[userIndex] = requestResponse
 
     def setRoleResultByRoleIndex(self, roleIndex, roleResult):
-        # TODO maybe make this where its calculated
+        # NOTE maybe make this where its calculated
         self._roleResults[roleIndex] = roleResult
 
     def isDeleted(self):
