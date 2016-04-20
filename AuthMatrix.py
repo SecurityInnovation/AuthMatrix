@@ -439,7 +439,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             cookieHeader = "Cookie:"
             newheader = cookieHeader
             previousCookies = []
-            # note: getHeaders has to be called again here cuz of java references
+            # NOTE: getHeaders has to be called again here cuz of java references
             for header in requestInfo.getHeaders():
                 # Find and remove existing cookie header
                 if str(header).startswith(cookieHeader):
@@ -656,9 +656,9 @@ class MatrixDB():
 
     def load(self, db, extender):
         def loadRequestResponse(index, callbacks, helpers, host, port, protocol, requestData):
-            # NOTE tempRequestResont is now an array
-            # because of a timing issue, where if this thread times out, it will still update temprequestresponse later on..
-            # TODO also this still locks the UI until all requests suceed or time out...
+            # NOTE: tempRequestResponse is an array because of a threading issue,
+            # where if this thread times out, it will still update temprequestresponse later on..
+            # TODO: also this still locks the UI until all requests suceed or time out...
             try:
                 # Due to Burp Extension API, must create a original request for all messages
                 service = helpers.buildHttpService(host, port, protocol)
@@ -830,7 +830,7 @@ class UserTableModel(AbstractTableModel):
             return 0
 
     def getColumnCount(self):
-        # NOTE maybe remove this try?
+        # NOTE: maybe remove this try?
         try:
             return len(self._db.getActiveRoleIndexes())+self._db.STATIC_USER_TABLE_COLUMN_COUNT
         except:
@@ -1134,7 +1134,7 @@ class MessageEntry:
         self._userRuns[userIndex] = requestResponse
 
     def setRoleResultByRoleIndex(self, roleIndex, roleResult):
-        # NOTE maybe make this where its calculated
+        # NOTE: maybe make this where its calculated
         self._roleResults[roleIndex] = roleResult
 
     def isDeleted(self):
