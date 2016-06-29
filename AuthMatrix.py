@@ -285,19 +285,34 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._messageTable.redrawTable()
 
         ret = []
-        messages = invocation.getSelectedMessages()
-
-        # Check if the messages in the target tree have a response
-        valid = True
+        messages = []
+        selectedMessages = invocation.getSelectedMessages()
+        text = "Send request(s) to AuthMatrix"
         if invocation.getInvocationContext() == invocation.CONTEXT_TARGET_SITE_MAP_TREE:
-            for selected in messages:
-                if not selected.getResponse():
-                    valid = False
+            for selected in selectedMessages:
+                if selected.getResponse():
+                    messages.append(selected)
+                else:
+                    text = "Send branch to AuthMatrix"
+                    # TODO currently grabs all children of the url (combining both the gear and the folder icons)
+                    # TODO also currently shows up for leaves with no response
+                    url = self._helpers.analyzeRequest(selected).getUrl().toString()
+                    if "http://" in url:
+                        url = url.replace(':80', '')
+                    if "https://" in url:
+                        url = url.replace(':443', '')
+                    print url
+                    print self._helpers.analyzeRequest(selected).getUrl().toExternalForm()
+                    print self._helpers.analyzeRequest(selected).getUrl().toURI().toString()
+                    sitemap = self._callbacks.getSiteMap(url)
+                    for request in sitemap:
+                        messages.append(request)
+        else:
+            messages = selectedMessages
 
-        if valid:
-            menuItem = JMenuItem("Send request(s) to AuthMatrix");
-            menuItem.addActionListener(addRequestsToTab)
-            ret.append(menuItem)
+        menuItem = JMenuItem(text);
+        menuItem.addActionListener(addRequestsToTab)
+        ret.append(menuItem)
         return ret
     
     ##
