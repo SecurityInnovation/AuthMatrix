@@ -71,7 +71,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.5.2")
+        callbacks.setExtensionName("AuthMatrix - v0.5.3")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -1085,7 +1085,6 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
             self.setBackground(table.getBackground())
 
         # Color based on results
-        # TODO adjust to more pleasant colors
         if column >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT:
             messageEntry = self._db.getMessageByRow(row)
             if messageEntry:
@@ -1095,13 +1094,13 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
                     if not roleIndex in messageEntry._roleResults:
                         self.setBackground(table.getBackground())
                     else:
-                        # TODO: Make a Border for the results that looks good
-                        #self.setBorder(MatteBorder(0,1,1,0,Color.BLACK))
-                        #self.setBorderPainted(True)
                         if messageEntry._roleResults[roleIndex]:
-                            self.setBackground(Color.GREEN)
+                            self.setBackground(Color(0x87,0xf7,0x17))
+                        elif messageEntry._roles[roleIndex]:
+                            # Set orange if its probably a false positive
+                            self.setBackground(Color(0xF8,0xB9,0x17))
                         else:
-                            self.setBackground(Color.RED)
+                            self.setBackground(Color(0xFF, 0x32, 0x17))
 
         return self
       

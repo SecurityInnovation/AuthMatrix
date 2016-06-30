@@ -1,6 +1,14 @@
+v0.5.3 - 06/29/2016
+
+STATE FILE COMPATIBILITY - v0.5.2 and greater
+
+* Modify color coding of results to be nicer colors and include orange for false positives/config errors.  Orange will generally imply that the session token is invalid or the success regex is incorrect.
+
+* Update readme images and describe orange color
+
 v0.5.2 - 04/13/2016
 
-STATE FILE COMPATIBILITY - v0.5.2
+STATE FILE COMPATIBILITY - v0.5.2 and greater
 
 * MAJOR BUG FIX: Issue when adding new roles after messages have already been sent to AuthMatrix.  Could lead to invalid results and incorrect UI display of the Message table's checkboxes. Invalidates some previous saved states.  
 * Re-enabled "Send from Target Map Tree" when the selected messages all have responses

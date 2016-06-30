@@ -1,4 +1,4 @@
-# AuthMatrix v0.5.2
+# AuthMatrix v0.5.3
 
 AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services. With AuthMatrix, testers focus on thoroughly defining tables of users, roles, and requests for their specific target application upfront. These tables are displayed through the UI in a similar format to that of an access control matrix commonly built in various threat modeling methodologies.
 
@@ -34,8 +34,21 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
 * OPTIONAL: If the target application uses user-specific reusable CSRF tokens, enter them into the correct field within the first table. Advanced CSRF protection handling is not currently supported in AuthMatrix.
 
-* Click Run to run all requests or right click several messages and select run.  Observe that the adjacent table will show color-coded results, red indicating the request did not return expected results and may indicate a vulnerability.
+* Click Run to run all requests or right click several messages and select run.  Observe that the adjacent table will show color-coded results
+
+..* Green indicates the request returned expected results
+
+..* Red indicates the request did not return expected results and may contain a vulnerability
+
+..* Orange indicates that the result may be a false positive.  This generally means there is an invalid/expired session token or an incorrect success regex.
+
+## Sample AuthMatrix Configuration
 
 ![Sample AuthMatrix Configuration]
 (img1.png)
+
+## Invalid AuthMatrix Configuration (False Positives Detected)
+
+![Invalid AuthMatrix Configuration]
+(img2.png)
 
