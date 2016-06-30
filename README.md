@@ -36,11 +36,11 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
 * Click Run to run all requests or right click several messages and select run.  Observe that the adjacent table will show color-coded results
 
-..* Green indicates the request returned expected results
+  * Green indicates the request returned expected results
 
-..* Red indicates the request did not return expected results and may contain a vulnerability
+  * Red indicates the request did not return expected results and may contain a vulnerability
 
-..* Orange indicates that the result may be a false positive.  This generally means there is an invalid/expired session token or an incorrect success regex.
+  * Orange indicates that the result may be a false positive.  This generally means there is an invalid/expired session token or an incorrect success regex.
 
 ## Sample AuthMatrix Configuration
 
