@@ -71,7 +71,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.5.3")
+        callbacks.setExtensionName("AuthMatrix - v0.5.4")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -171,6 +171,18 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._userTable.redrawTable()
                     selfExtender._messageTable.redrawTable()
 
+        class actionToggleRegex(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._messageTable.getSelectedRows():
+                        messages = [selfExtender._db.getMessageByRow(selfExtender._selectedRow)]
+                    else:
+                        messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
+                    for m in messages:
+                        m.setFailureRegex(not m.isFailureRegex())
+                    # TODO why is this selected column?
+                    selfExtender._selectedColumn = -1
+                    selfExtender._messageTable.redrawTable()
 
         # Message Table popups
         messagePopup = JPopupMenu()
@@ -181,6 +193,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         messageRemove = JMenuItem("Remove Request(s)")
         messageRemove.addActionListener(actionRemoveMessage())
         messagePopup.add(messageRemove)
+        toggleRegex = JMenuItem("Toggle Regex Mode (Failure/Success)")
+        toggleRegex.addActionListener(actionToggleRegex())
+        messagePopup.add(toggleRegex)
+
 
         messageHeaderPopup = JPopupMenu()
         addPopup(self._messageTable.getTableHeader(),messageHeaderPopup)
@@ -249,8 +265,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         # Handles checkbox color coding
         # Must be bellow the customizeUiComponent calls
-        self._messageTable.setDefaultRenderer(Boolean, SuccessBooleanRenderer(self._db))
-
+        self._messageTable.setDefaultRenderer(Boolean, SuccessBooleanRenderer(self._messageTable.getDefaultRenderer(Boolean), self._db))
+        self._messageTable.setDefaultRenderer(str, RegexRenderer(self._messageTable.getDefaultRenderer(str), self._db))
 
         # add the custom tab to Burp's UI
         callbacks.addSuiteTab(self)        
@@ -573,6 +589,7 @@ class MatrixDB():
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.LOAD_TIMEOUT = 3.0
         self.FAILURE_REGEX_SERIALIZE_CODE = "|AMFAILURE|"
+        self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
 
         self.lock = Lock()
         self.arrayOfMessages = ArrayList()
@@ -1079,22 +1096,24 @@ class MessageTable(JTable):
 # For color-coding checkboxes in the message table
 class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
-    def __init__(self, db):
+    def __init__(self, defaultCellRender, db):
         self.setOpaque(True)
         self.setHorizontalAlignment(JLabel.CENTER)
+        self._defaultCellRender = defaultCellRender
         self._db = db
 
     def getTableCellRendererComponent(self, table, value, isSelected, hasFocus, row, column):
+        cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
         if value:
-            self.setSelected(True)
+            cell.setSelected(True)
         else:
-            self.setSelected(False)
+            cell.setSelected(False)
         if isSelected:
-            self.setForeground(table.getSelectionForeground())
-            self.setBackground(table.getSelectionBackground())
+            cell.setForeground(table.getSelectionForeground())
+            cell.setBackground(table.getSelectionBackground())
         else:
-            self.setForeground(table.getForeground())
-            self.setBackground(table.getBackground())
+            cell.setForeground(table.getForeground())
+            cell.setBackground(table.getBackground())
 
         # Color based on results
         if column >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT:
@@ -1104,18 +1123,72 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
                 if roleEntry:
                     roleIndex = roleEntry._index
                     if not roleIndex in messageEntry._roleResults:
-                        self.setBackground(table.getBackground())
-                    else:
-                        if messageEntry._roleResults[roleIndex]:
-                            self.setBackground(Color(0x87,0xf7,0x17))
-                        elif messageEntry._roles[roleIndex]:
-                            # Set orange if its probably a false positive
-                            self.setBackground(Color(0xF8,0xB9,0x17))
+                        if isSelected:
+                            cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
                         else:
-                            self.setBackground(Color(0xFF, 0x32, 0x17))
+                            cell.setBackground(table.getBackground())
+                    else:
+                        # This site was used for generating color blends when selected (option 6 of 12)
+                        # http://meyerweb.com/eric/tools/color-blend/#FFCD81:00CCFF:10:hex
+                        if messageEntry._roleResults[roleIndex]:
+                            # Set Green if success
+                            if isSelected:
+                                cell.setBackground(Color(0xC8,0xE0,0x51))
+                            else:
+                                cell.setBackground(Color(0x87,0xf7,0x17))
+                        elif messageEntry._roles[roleIndex]:
+                            # Set Blue if its probably a false positive
+                            if isSelected:
+                                cell.setBackground(Color(0x8B, 0xCD, 0xBA))
+                            else:
+                                cell.setBackground(Color(0x00,0xCC,0xFF))
 
-        return self
+                            
+                        else:
+                            # Set Red if fail
+                            if isSelected:
+                                cell.setBackground(Color(0xFF, 0x87, 0x51))
+                            else:
+                                cell.setBackground(Color(0xFF, 0x32, 0x17))
+
+        return cell
       
+
+# For color-coding successregex in the message table
+class RegexRenderer(JLabel, TableCellRenderer):
+
+    def __init__(self, defaultCellRender, db):
+        self._defaultCellRender = defaultCellRender
+        self._db = db
+
+    def getTableCellRendererComponent(self, table, value, isSelected, hasFocus, row, column):
+        # Regex color
+        cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+
+        if column == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
+            messageEntry = self._db.getMessageByRow(row)
+            if messageEntry:
+                if messageEntry.isFailureRegex():
+                    # Set Grey if failure mode
+                    if isSelected:
+                        cell.setBackground(Color(0xD1,0xB5,0xA3))
+                    else:
+                        cell.setBackground(Color(0x99,0x99,0xCC))
+                else:
+                    if isSelected:
+                        cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
+                    else:
+                        cell.setBackground(table.getBackground())
+        else:
+            if isSelected:
+                cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
+            else:
+                cell.setBackground(table.getBackground())
+        return cell
+
+
+
+
 
 ##
 ## Classes for Messages, Roles, and Users
