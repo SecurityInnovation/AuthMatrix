@@ -57,6 +57,7 @@ from threading import Lock
 from threading import Thread
 import traceback
 import re
+from pprint import pprint
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
     
@@ -286,10 +287,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         ret = []
         messages = []
+        print "TEST"
+        print str(invocation.getInputEvent().toString())
         selectedMessages = invocation.getSelectedMessages()
         text = "Send request(s) to AuthMatrix"
         if invocation.getInvocationContext() == invocation.CONTEXT_TARGET_SITE_MAP_TREE:
             for selected in selectedMessages:
+                #print str(StringUtil.fromBytes(selected.getRequest()))
+
+
                 if selected.getResponse():
                     messages.append(selected)
                 else:
@@ -301,9 +307,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         url = url.replace(':80', '')
                     if "https://" in url:
                         url = url.replace(':443', '')
-                    print url
-                    print self._helpers.analyzeRequest(selected).getUrl().toExternalForm()
-                    print self._helpers.analyzeRequest(selected).getUrl().toURI().toString()
+                    #print url
+                    #print self._helpers.analyzeRequest(selected).getUrl().toExternalForm()
+                    #print self._helpers.analyzeRequest(selected).getUrl().toURI().toString()
                     sitemap = self._callbacks.getSiteMap(url)
                     for request in sitemap:
                         messages.append(request)
