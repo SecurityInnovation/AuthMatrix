@@ -572,6 +572,7 @@ class MatrixDB():
         self.STATIC_USER_TABLE_COLUMN_COUNT = 3
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.LOAD_TIMEOUT = 3.0
+        self.FAILURE_REGEX_SERIALIZE_CODE = "|AMFAILURE|"
 
         self.lock = Lock()
         self.arrayOfMessages = ArrayList()
@@ -693,7 +694,8 @@ class MatrixDB():
         newDomain = None
         replaceForAll = False
         skipped = 0
-        for message in db.arrayOfMessages: 
+        for message in db.arrayOfMessages:
+            # Confirm that the original request still works and doesnt timeout, otherwise offer to switch host domain 
             keeptrying = True
             while keeptrying:
                 self.tempRequestResponse.append(None)
@@ -710,11 +712,20 @@ class MatrixDB():
                 t.start()
                 t.join(self.LOAD_TIMEOUT)
                 if not t.isAlive() and self.tempRequestResponse[index] != None:
+                    # Add request because the original succeeded
+                    
+                    if message._successRegex.startswith(self.FAILURE_REGEX_SERIALIZE_CODE):
+                        regex = message._successRegex[len(self.FAILURE_REGEX_SERIALIZE_CODE):]
+                        failureRegexMode=True
+                    else:
+                        regex = message._successRegex
+                        failureRegexMode=False
+
                     self.arrayOfMessages.add(MessageEntry(
                         message._index,
                         message._tableRow-skipped,
                         callbacks.saveBuffersToTempFiles(self.tempRequestResponse[index]),
-                        message._url, message._name, message._roles, message._successRegex, message._deleted))
+                        message._url, message._name, message._roles, regex, message._deleted, failureRegexMode))
                     keeptrying = False
                     if not replaceForAll:
                         newDomain = None
@@ -734,6 +745,7 @@ class MatrixDB():
         self.lock.acquire()
         serializedMessages = []
         for message in self.arrayOfMessages:
+            regex = self.FAILURE_REGEX_SERIALIZE_CODE+message._successRegex if message.isFailureRegex() else message._successRegex
             serializedMessages.append(MessageEntryData(
                 message._index, 
                 message._tableRow,
@@ -741,7 +753,7 @@ class MatrixDB():
                 message._requestResponse.getHttpService().getHost(),
                 message._requestResponse.getHttpService().getPort(),
                 message._requestResponse.getHttpService().getProtocol(),
-                message._url, message._name, message._roles, message._successRegex, message._deleted))
+                message._url, message._name, message._roles, regex, message._deleted))
         ret = MatrixDBData(serializedMessages,self.arrayOfRoles, self.arrayOfUsers, self.deletedUserCount, self.deletedRoleCount, self.deletedMessageCount)
         self.lock.release()
         return ret
@@ -1111,13 +1123,15 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
 class MessageEntry:
 
-    def __init__(self, index, tableRow, requestResponse, url, name = "", roles = {}, regex = "^HTTP/1\\.1 200 OK", deleted = False):
+    def __init__(self, index, tableRow, requestResponse, url, name = "", roles = {}, regex = "^HTTP/1\\.1 200 OK", deleted = False, failureRegexMode = False):
         self._index = index
         self._tableRow = tableRow
         self._requestResponse = requestResponse
         self._url = url
         self._name = url.getPath() if not name else name
         self._roles = roles.copy()
+        self._failureRegexMode = failureRegexMode
+        # TODO: rename this to just Regex
         self._successRegex = regex
         self._deleted = deleted
         self._userRuns = {}
@@ -1144,6 +1158,12 @@ class MessageEntry:
 
     def getTableRow(self):
         return self._tableRow
+
+    def isFailureRegex(self):
+        return self._failureRegexMode
+
+    def setFailureRegex(self, enabled=True):
+        self._failureRegexMode = enabled
 
 class UserEntry:
 
@@ -1229,6 +1249,7 @@ class MessageEntryData:
         self._url = url
         self._name = name
         self._roles = roles
+        # NOTE: to preserve backwords compatability, successregex will have a specific prefix "|AMFAILURE|" to indicate FailureRegexMode
         self._successRegex = successRegex
         self._deleted = deleted
         return
