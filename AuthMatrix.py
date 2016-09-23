@@ -532,12 +532,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             requestResponse = self._callbacks.makeHttpRequest(messageInfo.getHttpService(),message)
             messageEntry.addRunByUserIndex(userIndex, self._callbacks.saveBuffersToTempFiles(requestResponse))
 
-        # Grab all active roleIndexes that should succeed
-        activeSuccessRoles = [index for index in messageEntry._roles.keys() if messageEntry._roles[index] and not self._db.arrayOfRoles[index].isDeleted()]
+        # Grab all active roleIndexes that are checkboxed
+        activeCheckBoxedRoles = [index for index in messageEntry._roles.keys() if messageEntry._roles[index] and not self._db.arrayOfRoles[index].isDeleted()]
         # Check Role Results of message
         for roleIndex in self._db.getActiveRoleIndexes():
-            success = self.checkResult(messageEntry, roleIndex, activeSuccessRoles)
-            messageEntry.setRoleResultByRoleIndex(roleIndex, success)
+            expectedResult = self.checkResult(messageEntry, roleIndex, activeCheckBoxedRoles)
+            messageEntry.setRoleResultByRoleIndex(roleIndex, expectedResult)
                     
     def colorCodeResults(self):
         self._messageTable.redrawTable()
@@ -553,7 +553,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             messageEntry._userRuns = {}
         self._messageTable.redrawTable()
 
-    def checkResult(self, messageEntry, roleIndex, activeSuccessRoles):
+    def checkResult(self, messageEntry, roleIndex, activeCheckBoxedRoles):
         for userIndex in self._db.getActiveUserIndexes():
             userEntry = self._db.arrayOfUsers[userIndex]
 
@@ -561,18 +561,29 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             # if user is not in this role, ignore it
             if not userEntry._roles[roleIndex]:
                 ignoreUser = True
-            # If user is in any other role that should succeed, then ignore it
-            for index in userEntry._roles.keys():
-                if not index == roleIndex and userEntry._roles[index] and index in activeSuccessRoles:
-                    ignoreUser = True
+
+            else:
+                # This is modified with the addition of Failure Regexes
+                # If user is in any other role that should succeed (or should fail), then ignore it
+                for index in self._db.getActiveRoleIndexes():
+                    # TODO is checking if the user is in that role redundant?
+                    if not index == roleIndex and userEntry._roles[index]:
+                        if (index in activeCheckBoxedRoles and not messageEntry.isFailureRegex()) or (index not in activeCheckBoxedRoles and messageEntry.isFailureRegex()):
+                            print str(roleIndex)+":"+userEntry._name+":"+str(index)
+                            ignoreUser = True
 
             if not ignoreUser:
-                shouldSucceed = roleIndex in activeSuccessRoles
                 requestResponse = messageEntry._userRuns[userEntry._index]
                 resp = StringUtil.fromBytes(requestResponse.getResponse())
                 found = re.search(messageEntry._successRegex, resp, re.DOTALL)
-                succeeds = found if shouldSucceed else not found
-                if not succeeds:
+
+                shouldMatchExpected = roleIndex in activeCheckBoxedRoles
+                expected = found if shouldMatchExpected else not found
+                
+                # Add logic for FailureExpected Regex
+                expected = not expected if messageEntry.isFailureRegex() else expected
+
+                if not expected:
                     return False
         return True
 
@@ -1130,20 +1141,22 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
                     else:
                         # This site was used for generating color blends when selected (option 6 of 12)
                         # http://meyerweb.com/eric/tools/color-blend/#FFCD81:00CCFF:10:hex
-                        if messageEntry._roleResults[roleIndex]:
+                        sawExpectedResults = messageEntry._roleResults[roleIndex]
+                        checkboxChecked = messageEntry._roles[roleIndex]
+                        failureRegexMode = messageEntry.isFailureRegex()
+
+                        if sawExpectedResults:
                             # Set Green if success
                             if isSelected:
                                 cell.setBackground(Color(0xC8,0xE0,0x51))
                             else:
                                 cell.setBackground(Color(0x87,0xf7,0x17))
-                        elif messageEntry._roles[roleIndex]:
+                        elif (checkboxChecked and not failureRegexMode) or (not checkboxChecked and failureRegexMode):
                             # Set Blue if its probably a false positive
                             if isSelected:
                                 cell.setBackground(Color(0x8B, 0xCD, 0xBA))
                             else:
                                 cell.setBackground(Color(0x00,0xCC,0xFF))
-
-                            
                         else:
                             # Set Red if fail
                             if isSelected:
