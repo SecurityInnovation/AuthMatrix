@@ -180,6 +180,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
                     for m in messages:
                         m.setFailureRegex(not m.isFailureRegex())
+                        # Clear Previous Results:
+                        m._roleResults = {}
+                        m._userRuns = {}
                     # TODO why is this selected column?
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
@@ -566,10 +569,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 # This is modified with the addition of Failure Regexes
                 # If user is in any other role that should succeed (or should fail), then ignore it
                 for index in self._db.getActiveRoleIndexes():
-                    # TODO is checking if the user is in that role redundant?
                     if not index == roleIndex and userEntry._roles[index]:
                         if (index in activeCheckBoxedRoles and not messageEntry.isFailureRegex()) or (index not in activeCheckBoxedRoles and messageEntry.isFailureRegex()):
-                            print str(roleIndex)+":"+userEntry._name+":"+str(index)
+                            #print str(roleIndex)+":"+userEntry._name+":"+str(index)
                             ignoreUser = True
 
             if not ignoreUser:
@@ -577,11 +579,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 resp = StringUtil.fromBytes(requestResponse.getResponse())
                 found = re.search(messageEntry._successRegex, resp, re.DOTALL)
 
-                shouldMatchExpected = roleIndex in activeCheckBoxedRoles
-                expected = found if shouldMatchExpected else not found
+                shouldSucceed = roleIndex in activeCheckBoxedRoles
+                succeed = found if shouldSucceed else not found
                 
-                # Add logic for FailureExpected Regex
-                expected = not expected if messageEntry.isFailureRegex() else expected
+                # Added logic for Failure Regexes
+                expected = not succeed if messageEntry.isFailureRegex() else succeed
 
                 if not expected:
                     return False
@@ -599,7 +601,7 @@ class MatrixDB():
         self.STATIC_USER_TABLE_COLUMN_COUNT = 3
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.LOAD_TIMEOUT = 3.0
-        self.FAILURE_REGEX_SERIALIZE_CODE = "|AMFAILURE|"
+        self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
         self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
 
         self.lock = Lock()
