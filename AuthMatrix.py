@@ -454,6 +454,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     # Replaces headers/cookies with user's token
     def getNewHeader(self, requestInfo, token, isCookie):
         headers = requestInfo.getHeaders()
+        
+        if not token:
+            return headers
+
         if isCookie:
             cookieHeader = "Cookie:"
             newheader = cookieHeader
@@ -1279,7 +1283,10 @@ class UserEntry:
         return self._tableRow
 
     def isCookie(self):
-        return self._token.find("=") > 0 and (self._token.find(":") == -1 or self._token.find("=") < self._token.find(":"))
+        if self._token:
+            return self._token.find("=") > 0 and (self._token.find(":") == -1 or self._token.find("=") < self._token.find(":"))
+        else:
+            return False
 
 class RoleEntry:
 
