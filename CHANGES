@@ -1,3 +1,13 @@
+v0.5.4 - 09/26/2016
+
+STATE FILE COMPATIBILITY - v0.5.2 and greater
+
+* Added support for Failure Regexes (i.e. if anonymous role is checked and it sees an HTTP 200 regex, flag it)
+
+* Bug fix: Fixed issue when session token is left blank
+
+* A more appealing color scheme
+
 v0.5.3 - 06/29/2016
 
 STATE FILE COMPATIBILITY - v0.5.2 and greater

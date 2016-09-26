@@ -196,7 +196,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         messageRemove = JMenuItem("Remove Request(s)")
         messageRemove.addActionListener(actionRemoveMessage())
         messagePopup.add(messageRemove)
-        toggleRegex = JMenuItem("Toggle Regex Mode (Failure/Success)")
+        toggleRegex = JMenuItem("Toggle Regex Mode (Success/Failure)")
         toggleRegex.addActionListener(actionToggleRegex())
         messagePopup.add(toggleRegex)
 
@@ -454,7 +454,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     # Replaces headers/cookies with user's token
     def getNewHeader(self, requestInfo, token, isCookie):
         headers = requestInfo.getHeaders()
-        
+
         if not token:
             return headers
 
@@ -992,7 +992,7 @@ class MessageTableModel(AbstractTableModel):
         elif columnIndex == 1:
             return "Request Name"
         elif columnIndex == 2:
-            return "Success Regex"
+            return "Response Regex"
         else:
             roleEntry = self._db.getRoleByMessageTableColumn(columnIndex)
             if roleEntry:
