@@ -1,4 +1,4 @@
-# AuthMatrix v0.5.3
+# AuthMatrix v0.5.4
 
 AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services. With AuthMatrix, testers focus on thoroughly defining tables of users, roles, and requests for their specific target application upfront. These tables are displayed through the UI in a similar format to that of an access control matrix commonly built in various threat modeling methodologies.
 
@@ -47,8 +47,14 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 ![Sample AuthMatrix Configuration]
 (img1.png)
 
+## Sample Configuration with Failure Regex Mode
+
+![Sample Configuration with Failure Regex Mode]
+(img2.png)
+
+
 ## Invalid AuthMatrix Configuration (False Positives Detected)
 
 ![Invalid AuthMatrix Configuration]
-(img2.png)
+(img3.png)
 

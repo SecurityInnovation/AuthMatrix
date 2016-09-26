@@ -71,7 +71,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.5.3")
+        callbacks.setExtensionName("AuthMatrix - v0.5.4")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -171,6 +171,21 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._userTable.redrawTable()
                     selfExtender._messageTable.redrawTable()
 
+        class actionToggleRegex(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._messageTable.getSelectedRows():
+                        messages = [selfExtender._db.getMessageByRow(selfExtender._selectedRow)]
+                    else:
+                        messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
+                    for m in messages:
+                        m.setFailureRegex(not m.isFailureRegex())
+                        # Clear Previous Results:
+                        m._roleResults = {}
+                        m._userRuns = {}
+                    # TODO why is this selected column?
+                    selfExtender._selectedColumn = -1
+                    selfExtender._messageTable.redrawTable()
 
         # Message Table popups
         messagePopup = JPopupMenu()
@@ -181,6 +196,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         messageRemove = JMenuItem("Remove Request(s)")
         messageRemove.addActionListener(actionRemoveMessage())
         messagePopup.add(messageRemove)
+        toggleRegex = JMenuItem("Toggle Regex Mode (Success/Failure)")
+        toggleRegex.addActionListener(actionToggleRegex())
+        messagePopup.add(toggleRegex)
+
 
         messageHeaderPopup = JPopupMenu()
         addPopup(self._messageTable.getTableHeader(),messageHeaderPopup)
@@ -249,8 +268,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         # Handles checkbox color coding
         # Must be bellow the customizeUiComponent calls
-        self._messageTable.setDefaultRenderer(Boolean, SuccessBooleanRenderer(self._db))
-
+        self._messageTable.setDefaultRenderer(Boolean, SuccessBooleanRenderer(self._messageTable.getDefaultRenderer(Boolean), self._db))
+        self._messageTable.setDefaultRenderer(str, RegexRenderer(self._messageTable.getDefaultRenderer(str), self._db))
 
         # add the custom tab to Burp's UI
         callbacks.addSuiteTab(self)        
@@ -435,6 +454,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     # Replaces headers/cookies with user's token
     def getNewHeader(self, requestInfo, token, isCookie):
         headers = requestInfo.getHeaders()
+
+        if not token:
+            return headers
+
         if isCookie:
             cookieHeader = "Cookie:"
             newheader = cookieHeader
@@ -516,12 +539,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             requestResponse = self._callbacks.makeHttpRequest(messageInfo.getHttpService(),message)
             messageEntry.addRunByUserIndex(userIndex, self._callbacks.saveBuffersToTempFiles(requestResponse))
 
-        # Grab all active roleIndexes that should succeed
-        activeSuccessRoles = [index for index in messageEntry._roles.keys() if messageEntry._roles[index] and not self._db.arrayOfRoles[index].isDeleted()]
+        # Grab all active roleIndexes that are checkboxed
+        activeCheckBoxedRoles = [index for index in messageEntry._roles.keys() if messageEntry._roles[index] and not self._db.arrayOfRoles[index].isDeleted()]
         # Check Role Results of message
         for roleIndex in self._db.getActiveRoleIndexes():
-            success = self.checkResult(messageEntry, roleIndex, activeSuccessRoles)
-            messageEntry.setRoleResultByRoleIndex(roleIndex, success)
+            expectedResult = self.checkResult(messageEntry, roleIndex, activeCheckBoxedRoles)
+            messageEntry.setRoleResultByRoleIndex(roleIndex, expectedResult)
                     
     def colorCodeResults(self):
         self._messageTable.redrawTable()
@@ -537,7 +560,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             messageEntry._userRuns = {}
         self._messageTable.redrawTable()
 
-    def checkResult(self, messageEntry, roleIndex, activeSuccessRoles):
+    def checkResult(self, messageEntry, roleIndex, activeCheckBoxedRoles):
         for userIndex in self._db.getActiveUserIndexes():
             userEntry = self._db.arrayOfUsers[userIndex]
 
@@ -545,18 +568,28 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             # if user is not in this role, ignore it
             if not userEntry._roles[roleIndex]:
                 ignoreUser = True
-            # If user is in any other role that should succeed, then ignore it
-            for index in userEntry._roles.keys():
-                if not index == roleIndex and userEntry._roles[index] and index in activeSuccessRoles:
-                    ignoreUser = True
+
+            else:
+                # This is modified with the addition of Failure Regexes
+                # If user is in any other role that should succeed (or should fail), then ignore it
+                for index in self._db.getActiveRoleIndexes():
+                    if not index == roleIndex and userEntry._roles[index]:
+                        if (index in activeCheckBoxedRoles and not messageEntry.isFailureRegex()) or (index not in activeCheckBoxedRoles and messageEntry.isFailureRegex()):
+                            #print str(roleIndex)+":"+userEntry._name+":"+str(index)
+                            ignoreUser = True
 
             if not ignoreUser:
-                shouldSucceed = roleIndex in activeSuccessRoles
                 requestResponse = messageEntry._userRuns[userEntry._index]
                 resp = StringUtil.fromBytes(requestResponse.getResponse())
                 found = re.search(messageEntry._successRegex, resp, re.DOTALL)
-                succeeds = found if shouldSucceed else not found
-                if not succeeds:
+
+                shouldSucceed = roleIndex in activeCheckBoxedRoles
+                succeed = found if shouldSucceed else not found
+                
+                # Added logic for Failure Regexes
+                expected = not succeed if messageEntry.isFailureRegex() else succeed
+
+                if not expected:
                     return False
         return True
 
@@ -572,6 +605,8 @@ class MatrixDB():
         self.STATIC_USER_TABLE_COLUMN_COUNT = 3
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.LOAD_TIMEOUT = 3.0
+        self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
+        self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
 
         self.lock = Lock()
         self.arrayOfMessages = ArrayList()
@@ -693,7 +728,8 @@ class MatrixDB():
         newDomain = None
         replaceForAll = False
         skipped = 0
-        for message in db.arrayOfMessages: 
+        for message in db.arrayOfMessages:
+            # Confirm that the original request still works and doesnt timeout, otherwise offer to switch host domain 
             keeptrying = True
             while keeptrying:
                 self.tempRequestResponse.append(None)
@@ -710,11 +746,20 @@ class MatrixDB():
                 t.start()
                 t.join(self.LOAD_TIMEOUT)
                 if not t.isAlive() and self.tempRequestResponse[index] != None:
+                    # Add request because the original succeeded
+                    
+                    if message._successRegex.startswith(self.FAILURE_REGEX_SERIALIZE_CODE):
+                        regex = message._successRegex[len(self.FAILURE_REGEX_SERIALIZE_CODE):]
+                        failureRegexMode=True
+                    else:
+                        regex = message._successRegex
+                        failureRegexMode=False
+
                     self.arrayOfMessages.add(MessageEntry(
                         message._index,
                         message._tableRow-skipped,
                         callbacks.saveBuffersToTempFiles(self.tempRequestResponse[index]),
-                        message._url, message._name, message._roles, message._successRegex, message._deleted))
+                        message._url, message._name, message._roles, regex, message._deleted, failureRegexMode))
                     keeptrying = False
                     if not replaceForAll:
                         newDomain = None
@@ -734,6 +779,7 @@ class MatrixDB():
         self.lock.acquire()
         serializedMessages = []
         for message in self.arrayOfMessages:
+            regex = self.FAILURE_REGEX_SERIALIZE_CODE+message._successRegex if message.isFailureRegex() else message._successRegex
             serializedMessages.append(MessageEntryData(
                 message._index, 
                 message._tableRow,
@@ -741,7 +787,7 @@ class MatrixDB():
                 message._requestResponse.getHttpService().getHost(),
                 message._requestResponse.getHttpService().getPort(),
                 message._requestResponse.getHttpService().getProtocol(),
-                message._url, message._name, message._roles, message._successRegex, message._deleted))
+                message._url, message._name, message._roles, regex, message._deleted))
         ret = MatrixDBData(serializedMessages,self.arrayOfRoles, self.arrayOfUsers, self.deletedUserCount, self.deletedRoleCount, self.deletedMessageCount)
         self.lock.release()
         return ret
@@ -946,7 +992,7 @@ class MessageTableModel(AbstractTableModel):
         elif columnIndex == 1:
             return "Request Name"
         elif columnIndex == 2:
-            return "Success Regex"
+            return "Response Regex"
         else:
             roleEntry = self._db.getRoleByMessageTableColumn(columnIndex)
             if roleEntry:
@@ -1067,22 +1113,24 @@ class MessageTable(JTable):
 # For color-coding checkboxes in the message table
 class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
-    def __init__(self, db):
+    def __init__(self, defaultCellRender, db):
         self.setOpaque(True)
         self.setHorizontalAlignment(JLabel.CENTER)
+        self._defaultCellRender = defaultCellRender
         self._db = db
 
     def getTableCellRendererComponent(self, table, value, isSelected, hasFocus, row, column):
+        cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
         if value:
-            self.setSelected(True)
+            cell.setSelected(True)
         else:
-            self.setSelected(False)
+            cell.setSelected(False)
         if isSelected:
-            self.setForeground(table.getSelectionForeground())
-            self.setBackground(table.getSelectionBackground())
+            cell.setForeground(table.getSelectionForeground())
+            cell.setBackground(table.getSelectionBackground())
         else:
-            self.setForeground(table.getForeground())
-            self.setBackground(table.getBackground())
+            cell.setForeground(table.getForeground())
+            cell.setBackground(table.getBackground())
 
         # Color based on results
         if column >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT:
@@ -1092,18 +1140,74 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
                 if roleEntry:
                     roleIndex = roleEntry._index
                     if not roleIndex in messageEntry._roleResults:
-                        self.setBackground(table.getBackground())
-                    else:
-                        if messageEntry._roleResults[roleIndex]:
-                            self.setBackground(Color(0x87,0xf7,0x17))
-                        elif messageEntry._roles[roleIndex]:
-                            # Set orange if its probably a false positive
-                            self.setBackground(Color(0xF8,0xB9,0x17))
+                        if isSelected:
+                            cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
                         else:
-                            self.setBackground(Color(0xFF, 0x32, 0x17))
+                            cell.setBackground(table.getBackground())
+                    else:
+                        # This site was used for generating color blends when selected (option 6 of 12)
+                        # http://meyerweb.com/eric/tools/color-blend/#FFCD81:00CCFF:10:hex
+                        sawExpectedResults = messageEntry._roleResults[roleIndex]
+                        checkboxChecked = messageEntry._roles[roleIndex]
+                        failureRegexMode = messageEntry.isFailureRegex()
 
-        return self
+                        if sawExpectedResults:
+                            # Set Green if success
+                            if isSelected:
+                                cell.setBackground(Color(0xC8,0xE0,0x51))
+                            else:
+                                cell.setBackground(Color(0x87,0xf7,0x17))
+                        elif (checkboxChecked and not failureRegexMode) or (not checkboxChecked and failureRegexMode):
+                            # Set Blue if its probably a false positive
+                            if isSelected:
+                                cell.setBackground(Color(0x8B, 0xCD, 0xBA))
+                            else:
+                                cell.setBackground(Color(0x00,0xCC,0xFF))
+                        else:
+                            # Set Red if fail
+                            if isSelected:
+                                cell.setBackground(Color(0xFF, 0x87, 0x51))
+                            else:
+                                cell.setBackground(Color(0xFF, 0x32, 0x17))
+
+        return cell
       
+
+# For color-coding successregex in the message table
+class RegexRenderer(JLabel, TableCellRenderer):
+
+    def __init__(self, defaultCellRender, db):
+        self._defaultCellRender = defaultCellRender
+        self._db = db
+
+    def getTableCellRendererComponent(self, table, value, isSelected, hasFocus, row, column):
+        # Regex color
+        cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+
+        if column == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
+            messageEntry = self._db.getMessageByRow(row)
+            if messageEntry:
+                if messageEntry.isFailureRegex():
+                    # Set Grey if failure mode
+                    if isSelected:
+                        cell.setBackground(Color(0xD1,0xB5,0xA3))
+                    else:
+                        cell.setBackground(Color(0x99,0x99,0xCC))
+                else:
+                    if isSelected:
+                        cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
+                    else:
+                        cell.setBackground(table.getBackground())
+        else:
+            if isSelected:
+                cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
+            else:
+                cell.setBackground(table.getBackground())
+        return cell
+
+
+
+
 
 ##
 ## Classes for Messages, Roles, and Users
@@ -1111,13 +1215,15 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
 class MessageEntry:
 
-    def __init__(self, index, tableRow, requestResponse, url, name = "", roles = {}, regex = "^HTTP/1\\.1 200 OK", deleted = False):
+    def __init__(self, index, tableRow, requestResponse, url, name = "", roles = {}, regex = "^HTTP/1\\.1 200 OK", deleted = False, failureRegexMode = False):
         self._index = index
         self._tableRow = tableRow
         self._requestResponse = requestResponse
         self._url = url
         self._name = url.getPath() if not name else name
         self._roles = roles.copy()
+        self._failureRegexMode = failureRegexMode
+        # TODO: rename this to just Regex
         self._successRegex = regex
         self._deleted = deleted
         self._userRuns = {}
@@ -1145,6 +1251,12 @@ class MessageEntry:
     def getTableRow(self):
         return self._tableRow
 
+    def isFailureRegex(self):
+        return self._failureRegexMode
+
+    def setFailureRegex(self, enabled=True):
+        self._failureRegexMode = enabled
+
 class UserEntry:
 
     def __init__(self, index, rowIndex, name, token=""):
@@ -1171,7 +1283,10 @@ class UserEntry:
         return self._tableRow
 
     def isCookie(self):
-        return self._token.find("=") > 0 and (self._token.find(":") == -1 or self._token.find("=") < self._token.find(":"))
+        if self._token:
+            return self._token.find("=") > 0 and (self._token.find(":") == -1 or self._token.find("=") < self._token.find(":"))
+        else:
+            return False
 
 class RoleEntry:
 
@@ -1229,6 +1344,7 @@ class MessageEntryData:
         self._url = url
         self._name = name
         self._roles = roles
+        # NOTE: to preserve backwords compatability, successregex will have a specific prefix "|AMFAILURE|" to indicate FailureRegexMode
         self._successRegex = successRegex
         self._deleted = deleted
         return
