@@ -47,8 +47,14 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 ![Sample AuthMatrix Configuration]
 (img1.png)
 
+## Sample Configuration with Failure Regex Mode
+
+![Sample Configuration with Failure Regex Mode]
+(img2.png)
+
+
 ## Invalid AuthMatrix Configuration (False Positives Detected)
 
 ![Invalid AuthMatrix Configuration]
-(img2.png)
+(img3.png)
 
