@@ -71,7 +71,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.5.4")
+        callbacks.setExtensionName("AuthMatrix - v0.6.0")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -181,8 +181,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     for m in messages:
                         m.setFailureRegex(not m.isFailureRegex())
                         # Clear Previous Results:
-                        m._roleResults = {}
-                        m._userRuns = {}
+                        m.clearResults()
                     # TODO why is this selected column?
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
@@ -506,25 +505,24 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def runMessage(self, messageIndex):
         messageEntry = self._db.arrayOfMessages[messageIndex]
         # Clear Previous Results:
-        messageEntry._roleResults = {}
-        messageEntry._userRuns = {}
+        messageEntry.clearResults()
 
         messageInfo = messageEntry._requestResponse
         requestInfo = self._helpers.analyzeRequest(messageInfo)
         reqBody = messageInfo.getRequest()[requestInfo.getBodyOffset():]
         for userIndex in self._db.getActiveUserIndexes():
             userEntry = self._db.arrayOfUsers[userIndex]
-            headers = self.getNewHeader(requestInfo, userEntry._token, userEntry.isCookie())
+            headers = self.getNewHeader(requestInfo, userEntry._cookies, userEntry.isCookie())
 
             # Add static CSRF token if available
             # TODO: Kinda hacky, but for now it will add the token as long as there is some content in the post body
             # Even if its a GET request.  This screws up when original requests have no body though... oh well...
             newBody = reqBody
-            if userEntry._staticcsrf and len(reqBody):
-                delimeter = userEntry._staticcsrf.find("=")
+            if userEntry._postargs and len(reqBody):
+                delimeter = userEntry._postargs.find("=")
                 if delimeter >= 0:
-                    csrfname = userEntry._staticcsrf[0:delimeter]
-                    csrfvalue = userEntry._staticcsrf[delimeter+1:]
+                    csrfname = userEntry._postargs[0:delimeter]
+                    csrfvalue = userEntry._postargs[delimeter+1:]
                     params = requestInfo.getParameters()
                     for param in params:
                         if str(param.getName())==csrfname:
@@ -532,7 +530,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             if param.getType() == 1:
                                 newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
                     if newBody == reqBody:
-                        newBody = reqBody+StringUtil.toBytes("&"+userEntry._staticcsrf)
+                        newBody = reqBody+StringUtil.toBytes("&"+userEntry._postargs)
 
             # Construct and send a message with the new headers
             message = self._helpers.buildHttpMessage(headers, newBody)
@@ -556,8 +554,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             messageIndexes = messageIndexArray
         for messageIndex in messageIndexes:
             messageEntry = self._db.arrayOfMessages[messageIndex]
-            messageEntry._roleResults = {}
-            messageEntry._userRuns = {}
+            messageEntry.clearResults()
         self._messageTable.redrawTable()
 
     def checkResult(self, messageEntry, roleIndex, activeCheckBoxedRoles):
@@ -580,7 +577,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
             if not ignoreUser:
                 requestResponse = messageEntry._userRuns[userEntry._index]
-                resp = StringUtil.fromBytes(requestResponse.getResponse())
+                response = requestResponse.getResponse()
+                if not response:
+                    print "ERROR: Request failed or timed out during Run"
+                    return False
+                resp = StringUtil.fromBytes(response)
                 found = re.search(messageEntry._successRegex, resp, re.DOTALL)
 
                 shouldSucceed = roleIndex in activeCheckBoxedRoles
@@ -602,7 +603,7 @@ class MatrixDB():
     def __init__(self):
         # Holds all custom data
         # NOTE: consider moving these constants to a different class
-        self.STATIC_USER_TABLE_COLUMN_COUNT = 3
+        self.STATIC_USER_TABLE_COLUMN_COUNT = 4
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.LOAD_TIMEOUT = 3.0
         self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
@@ -617,7 +618,7 @@ class MatrixDB():
         self.deletedMessageCount = 0
 
     # Returns the index of the user, whether its new or not
-    def getOrCreateUser(self, name, token=""):
+    def getOrCreateUser(self, name):
         self.lock.acquire()
         userIndex = -1
         # Check if User already exits
@@ -629,7 +630,7 @@ class MatrixDB():
             userIndex = self.arrayOfUsers.size()
             self.arrayOfUsers.add(UserEntry(userIndex,
                 userIndex - self.deletedUserCount,
-                name, token))
+                name))
 
             # Add all existing roles as unchecked
             for roleIndex in self.getActiveRoleIndexes():
@@ -870,25 +871,20 @@ class UserTableModel(AbstractTableModel):
         self._db = db
 
     def getRowCount(self):
-        try:
-            return len(self._db.getActiveUserIndexes())
-        except:
-            return 0
+        return len(self._db.getActiveUserIndexes())
 
     def getColumnCount(self):
-        # NOTE: maybe remove this try?
-        try:
-            return len(self._db.getActiveRoleIndexes())+self._db.STATIC_USER_TABLE_COLUMN_COUNT
-        except:
-            return self._db.STATIC_USER_TABLE_COLUMN_COUNT
-
+        return len(self._db.getActiveRoleIndexes())+self._db.STATIC_USER_TABLE_COLUMN_COUNT
+        
     def getColumnName(self, columnIndex):
         if columnIndex == 0:
             return "User"
         elif columnIndex == 1:
-            return "Session Token"
+            return "Cookies"
         elif columnIndex == 2:
-            return "(Optional) CSRF Token"
+            return "HTTP Header"
+        elif columnIndex == 3:
+            return "POST Args (Anti-CSRF)"
         else:
             roleEntry = self._db.getRoleByUserTableColumn(columnIndex)
             if roleEntry:
@@ -901,9 +897,11 @@ class UserTableModel(AbstractTableModel):
             if columnIndex == 0:
                 return str(userEntry._name)
             elif columnIndex == 1:
-                return userEntry._token
+                return userEntry._cookies
             elif columnIndex == 2:
-                return userEntry._staticcsrf
+                return userEntry._header
+            elif columnIndex == 3:
+                return userEntry._postargs
             else:
                 roleEntry = self._db.getRoleByUserTableColumn(columnIndex)
                 if roleEntry:
@@ -923,9 +921,11 @@ class UserTableModel(AbstractTableModel):
             if col == 0:
                 userEntry._name = val
             elif col == 1:
-                userEntry._token = val
+                userEntry._cookies = val
             elif col == 2:
-                userEntry._staticcsrf = val
+                userEntry._header = val
+            elif col == 3:
+                userEntry._postargs = val
             else:
                 roleIndex = self._db.getRoleByUserTableColumn(col)._index
                 userEntry.addRoleByIndex(roleIndex, val)
@@ -938,7 +938,7 @@ class UserTableModel(AbstractTableModel):
         
     # Create checkboxes
     def getColumnClass(self, columnIndex):
-        if columnIndex <= 2:
+        if columnIndex < self._db.STATIC_USER_TABLE_COLUMN_COUNT:
             return str
         else:
             return Boolean
@@ -961,13 +961,17 @@ class UserTable(JTable):
         self.getColumnModel().getColumn(0).setMinWidth(100);
         self.getColumnModel().getColumn(0).setMaxWidth(1000);
 
-        # Session Token
+        # Cookie
         self.getColumnModel().getColumn(1).setMinWidth(300);
         self.getColumnModel().getColumn(1).setMaxWidth(1500);
 
-        # CSRF Token
+        # Header
         self.getColumnModel().getColumn(2).setMinWidth(150);
         self.getColumnModel().getColumn(2).setMaxWidth(1500);
+
+        # POST args
+        self.getColumnModel().getColumn(3).setMinWidth(150);
+        self.getColumnModel().getColumn(3).setMaxWidth(1500);
 
         self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
 
@@ -978,11 +982,8 @@ class MessageTableModel(AbstractTableModel):
         self._db = db
 
     def getRowCount(self):
-        try:
-            return len(self._db.getActiveMessageIndexes())
-        except:
-            return 0
-
+        return len(self._db.getActiveMessageIndexes())
+        
     def getColumnCount(self):
         return self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT+len(self._db.getActiveRoleIndexes())
 
@@ -1030,7 +1031,14 @@ class MessageTableModel(AbstractTableModel):
         else:
             roleIndex = self._db.getRoleByMessageTableColumn(col)._index
             messageEntry.addRoleByIndex(roleIndex,val)
+        messageEntry.clearResults()
         self.fireTableCellUpdated(row,col)
+        # Update the chekbox colors since the results were deleted
+        for i in range(self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT, self.getColumnCount()):
+            self.fireTableCellUpdated(row,i)
+        # Backup option
+        # Update entire table since it affects color
+        # self.fireTableDataChanged()
 
     # Set checkboxes editable
     def isCellEditable(self, row, col):
@@ -1257,16 +1265,22 @@ class MessageEntry:
     def setFailureRegex(self, enabled=True):
         self._failureRegexMode = enabled
 
+    def clearResults(self):
+        # Clear Previous Results:
+        self._roleResults = {}
+        self._userRuns = {}
+
 class UserEntry:
 
-    def __init__(self, index, rowIndex, name, token=""):
+    def __init__(self, index, rowIndex, name):
         self._index = index
         self._name = name
         self._roles = {}
         self._deleted = False
         self._tableRow = rowIndex
-        self._token = token
-        self._staticcsrf = ""
+        self._cookies = ""
+        self._header = ""
+        self._postargs = ""
         return
 
     # Roles are the index of the db role array and a bool for whether the checkbox is default enabled or not
@@ -1283,8 +1297,8 @@ class UserEntry:
         return self._tableRow
 
     def isCookie(self):
-        if self._token:
-            return self._token.find("=") > 0 and (self._token.find(":") == -1 or self._token.find("=") < self._token.find(":"))
+        if self._cookies:
+            return self._cookies.find("=") > 0 and (self._cookies.find(":") == -1 or self._cookies.find("=") < self._cookies.find(":"))
         else:
             return False
 
