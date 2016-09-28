@@ -451,15 +451,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self.colorCodeResults()
 
     # Replaces headers/cookies with user's token
-    def getNewHeader(self, requestInfo, token, isCookie):
+    def getNewHeaders(self, requestInfo, newCookieString, newHeader):
         headers = requestInfo.getHeaders()
 
-        if not token:
-            return headers
-
-        if isCookie:
+        # Handle Cookies
+        if newCookieString:
             cookieHeader = "Cookie:"
-            newheader = cookieHeader
             previousCookies = []
             # NOTE: getHeaders has to be called again here cuz of java references
             for header in requestInfo.getHeaders():
@@ -468,7 +465,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     previousCookies = str(header)[len(cookieHeader):].replace(" ","").split(";")
                     headers.remove(header)
 
-            newCookies = token.replace(" ","").split(";")
+            newCookies = newCookieString.replace(" ","").split(";")
             newCookieVariableNames = []
             for newCookie in newCookies:
                 # If its a valid cookie
@@ -486,25 +483,48 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
             # Remove whitespace
             newCookies = [x for x in newCookies if x]
-            newheader = cookieHeader+" "+";".join(newCookies)
+            headers.add(cookieHeader+" "+";".join(newCookies))
 
-        else:
+        # Handle Custom Header
+        if newHeader:
             # TODO: Support multiple headers with a newline somehow
-            newheader = token
             # Remove previous HTTP Header
-            colon = newheader.find(":")
+            colon = newHeader.find(":")
             if colon >= 0:
                 # getHeaders has to be called again here cuz of java references
                 for header in requestInfo.getHeaders():
                     # If the header already exists, remove it
-                    if str(header).startswith(newheader[0:colon+1]):
+                    if str(header).startswith(newHeader[0:colon+1]):
                         headers.remove(header)
-        headers.add(newheader)
+            headers.add(newHeader)
+
         return headers
+
+    # Add static CSRF token if available
+    def getNewBody(self, requestInfo, reqBody, postargs):
+        
+        # Kinda hacky, but for now it will add the token as long as there is some content in the post body
+        # Even if its a GET request.  This screws up when original requests have no body though... oh well...
+        # TODO: Currently only handles one token
+        newBody = reqBody
+        if postargs and len(reqBody):
+            delimeter = postargs.find("=")
+            if delimeter >= 0:
+                csrfname = postargs[0:delimeter]
+                csrfvalue = postargs[delimeter+1:]
+                params = requestInfo.getParameters()
+                for param in params:
+                    if str(param.getName())==csrfname:
+                        # Handle CSRF Tokens in Body
+                        if param.getType() == 1:
+                            newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
+                if newBody == reqBody:
+                    newBody = reqBody+StringUtil.toBytes("&"+postargs)
+        return newBody
+
 
     def runMessage(self, messageIndex):
         messageEntry = self._db.arrayOfMessages[messageIndex]
-        # Clear Previous Results:
         messageEntry.clearResults()
 
         messageInfo = messageEntry._requestResponse
@@ -512,28 +532,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         reqBody = messageInfo.getRequest()[requestInfo.getBodyOffset():]
         for userIndex in self._db.getActiveUserIndexes():
             userEntry = self._db.arrayOfUsers[userIndex]
-            headers = self.getNewHeader(requestInfo, userEntry._cookies, userEntry.isCookie())
-
-            # Add static CSRF token if available
-            # TODO: Kinda hacky, but for now it will add the token as long as there is some content in the post body
-            # Even if its a GET request.  This screws up when original requests have no body though... oh well...
-            newBody = reqBody
-            if userEntry._postargs and len(reqBody):
-                delimeter = userEntry._postargs.find("=")
-                if delimeter >= 0:
-                    csrfname = userEntry._postargs[0:delimeter]
-                    csrfvalue = userEntry._postargs[delimeter+1:]
-                    params = requestInfo.getParameters()
-                    for param in params:
-                        if str(param.getName())==csrfname:
-                            # Handle CSRF Tokens in Body
-                            if param.getType() == 1:
-                                newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
-                    if newBody == reqBody:
-                        newBody = reqBody+StringUtil.toBytes("&"+userEntry._postargs)
+            
+            newHeaders = self.getNewHeaders(requestInfo, userEntry._cookies, userEntry._header)
+            newBody = self.getNewBody(requestInfo, reqBody, userEntry._postargs)
 
             # Construct and send a message with the new headers
-            message = self._helpers.buildHttpMessage(headers, newBody)
+            message = self._helpers.buildHttpMessage(newHeaders, newBody)
             requestResponse = self._callbacks.makeHttpRequest(messageInfo.getHttpService(),message)
             messageEntry.addRunByUserIndex(userIndex, self._callbacks.saveBuffersToTempFiles(requestResponse))
 
@@ -884,7 +888,7 @@ class UserTableModel(AbstractTableModel):
         elif columnIndex == 2:
             return "HTTP Header"
         elif columnIndex == 3:
-            return "POST Args (Anti-CSRF)"
+            return "HTTP Parameter (CSRF)"
         else:
             roleEntry = self._db.getRoleByUserTableColumn(columnIndex)
             if roleEntry:
@@ -1295,12 +1299,6 @@ class UserEntry:
 
     def getTableRow(self):
         return self._tableRow
-
-    def isCookie(self):
-        if self._cookies:
-            return self._cookies.find("=") > 0 and (self._cookies.find(":") == -1 or self._cookies.find("=") < self._cookies.find(":"))
-        else:
-            return False
 
 class RoleEntry:
 
