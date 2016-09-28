@@ -22,6 +22,7 @@ from burp import IBurpExtender
 from burp import ITab
 from burp import IMessageEditorController
 from burp import IContextMenuFactory
+from burp import IHttpRequestResponse
 
 from java.awt import Component;
 from java.awt import GridLayout;
@@ -180,8 +181,34 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
                     for m in messages:
                         m.setFailureRegex(not m.isFailureRegex())
-                        # Clear Previous Results:
                         m.clearResults()
+                    # TODO why is this selected column?
+                    selfExtender._selectedColumn = -1
+                    selfExtender._messageTable.redrawTable()
+
+        class actionChangeDomain(ActionListener):
+            def replaceDomain(self, requestData, oldDomain, newDomain):
+                reqstr = StringUtil.fromBytes(requestData)
+                reqstr = reqstr.replace("Host: "+oldDomain, "Host: "+newDomain)
+                newreq = StringUtil.toBytes(reqstr)
+                return newreq
+
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._messageTable.getSelectedRows():
+                        messages = [selfExtender._db.getMessageByRow(selfExtender._selectedRow)]
+                    else:
+                        messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
+
+                    ok, host, port, tls = selfExtender.changeDomainPopup()
+                    if ok:
+                        if not port:
+                            port = 443 if tls else 80
+                        for m in messages:
+                            # TODO is replacing the host header appropriate here?
+                            request = self.replaceDomain(m._requestResponse.getRequest(), m._requestResponse.getHttpService().getHost(), host)
+                            m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request)
+                            m.clearResults()
                     # TODO why is this selected column?
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
@@ -198,6 +225,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         toggleRegex = JMenuItem("Toggle Regex Mode (Success/Failure)")
         toggleRegex.addActionListener(actionToggleRegex())
         messagePopup.add(toggleRegex)
+        changeDomain = JMenuItem("Change Target Domain")
+        changeDomain.addActionListener(actionChangeDomain())
+        messagePopup.add(changeDomain)
+        
 
 
         messageHeaderPopup = JPopupMenu()
@@ -297,6 +328,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         def addRequestsToTab(e):
             for messageInfo in messages:
                 # saveBuffers is required since modifying the original from its source changes the saved objects, its not a copy
+                # TODO maybe replace with RequestResponseStored?
                 messageIndex = self._db.createNewMessage(self._callbacks.saveBuffersToTempFiles(messageInfo), 
                     self._helpers.analyzeRequest(messageInfo).getUrl())
                 #self._messageTable.getModel().addRow(row)
@@ -358,6 +390,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._messageTable.redrawTable()
 
     def saveClick(self, e):
+        # Update original requests with any user changes
+        self._messageTable.updateMessages()
+
         returnVal = self._fc.showSaveDialog(self._splitpane)
         if returnVal == JFileChooser.APPROVE_OPTION:
             f = self._fc.getSelectedFile()
@@ -409,34 +444,47 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._tabs.removeAll()
         t.start()
 
-    def changeDomainPopup(self, oldDomain, index):
+
+    def changeDomainPopup(self):
         hostField = JTextField(25)
+        portField = JTextField(25)
         checkbox = JCheckBox()
         domainPanel = JPanel(GridLayout(0,1))
-        domainPanel.add(JLabel("Request %s: Domain %s inaccessible. Enter new domain." % (str(index),oldDomain)))
 
         firstline = JPanel()
-        firstline.add(JLabel("Host:"))
-        firstline.add(hostField)
+        firstline.add(JLabel("Specify the details of the server to which the request will be sent."))
         domainPanel.add(firstline)
         secondline = JPanel()
-        secondline.add(JLabel("Replace domain for all requests?"))
-        secondline.add(checkbox)
+        secondline.add(JLabel("Host: "))
+        secondline.add(hostField)
         domainPanel.add(secondline)
+        thirdline = JPanel()
+        thirdline.add(JLabel("Port: "))
+        thirdline.add(portField)
+        domainPanel.add(thirdline)
+        fourthline = JPanel()
+        fourthline.add(checkbox)
+        fourthline.add(JLabel("Use HTTPS"))
+        domainPanel.add(fourthline)
+
         result = JOptionPane.showConfirmDialog(
-            self._splitpane,domainPanel, "Domain Inaccessible", JOptionPane.OK_CANCEL_OPTION)
+            self._splitpane,domainPanel, "Configure target details", JOptionPane.OK_CANCEL_OPTION)
         cancelled = (result == JOptionPane.CANCEL_OPTION)
         if cancelled:
-            return (False, None, False)
-        return (True, hostField.getText(), checkbox.isSelected())
+            return (False, None, None, False)
+        return (True, hostField.getText(), portField.getText(), checkbox.isSelected())
 
     ##
     ## Methods for running messages and analyzing results
     ##
 
     def runMessagesThread(self, messageIndexes=None):
+        # TODO timeout run
         self._db.lock.acquire()
         try:
+            # Update original requests with any user changes
+            self._messageTable.updateMessages()
+
             indexes = messageIndexes
             if not indexes:
                 indexes = self._db.getActiveMessageIndexes()
@@ -695,31 +743,6 @@ class MatrixDB():
         self.lock.release()
 
     def load(self, db, extender):
-        def loadRequestResponse(index, callbacks, helpers, host, port, protocol, requestData):
-            # NOTE: tempRequestResponse is an array because of a threading issue,
-            # where if this thread times out, it will still update temprequestresponse later on..
-            # TODO: also this still locks the UI until all requests suceed or time out...
-            try:
-                # Due to Burp Extension API, must create a original request for all messages
-                service = helpers.buildHttpService(host, port, protocol)
-                if service:
-                    self.tempRequestResponse[index] = callbacks.makeHttpRequest(service,requestData)
-            except java.lang.RuntimeException:
-                # Catches if there is a bad host
-                # TODO there is an unhandled exception thrown in the stack trace here?
-                return
-            except:
-                traceback.print_exc(file=callbacks.getStderr())
-
-        def replaceDomain(requestData, oldDomain, newDomain):
-            reqstr = StringUtil.fromBytes(requestData)
-            reqstr = reqstr.replace(oldDomain, newDomain)
-            newreq = StringUtil.toBytes(reqstr)
-            return newreq
-
-        callbacks = extender._callbacks
-        helpers = extender._helpers
-
         self.lock.acquire()
         self.arrayOfRoles = db.arrayOfRoles
         self.arrayOfUsers = db.arrayOfUsers
@@ -728,52 +751,19 @@ class MatrixDB():
         self.deletedMessageCount = db.deletedMessageCount
         self.arrayOfMessages = ArrayList()
 
-        self.tempRequestResponse = []
-        index=0
-        newDomain = None
-        replaceForAll = False
-        skipped = 0
         for message in db.arrayOfMessages:
-            # Confirm that the original request still works and doesnt timeout, otherwise offer to switch host domain 
-            keeptrying = True
-            while keeptrying:
-                self.tempRequestResponse.append(None)
-
-                if newDomain:
-                    requestData = replaceDomain(message._requestData, message._host, newDomain)
-                    host = newDomain
-                    # TODO consider changing port too?
-                else:
-                    requestData = message._requestData
-                    host = message._host
-
-                t = Thread(target=loadRequestResponse, args = [index, callbacks, helpers, host, message._port, message._protocol, requestData])
-                t.start()
-                t.join(self.LOAD_TIMEOUT)
-                if not t.isAlive() and self.tempRequestResponse[index] != None:
-                    # Add request because the original succeeded
-                    
-                    if message._successRegex.startswith(self.FAILURE_REGEX_SERIALIZE_CODE):
-                        regex = message._successRegex[len(self.FAILURE_REGEX_SERIALIZE_CODE):]
-                        failureRegexMode=True
-                    else:
-                        regex = message._successRegex
-                        failureRegexMode=False
-
-                    self.arrayOfMessages.add(MessageEntry(
-                        message._index,
-                        message._tableRow-skipped,
-                        callbacks.saveBuffersToTempFiles(self.tempRequestResponse[index]),
-                        message._url, message._name, message._roles, regex, message._deleted, failureRegexMode))
-                    keeptrying = False
-                    if not replaceForAll:
-                        newDomain = None
-                else:
-                    keeptrying, newDomain, replaceForAll = extender.changeDomainPopup(host, message._tableRow)
-                    if not keeptrying:
-                        skipped += 1
-                    
-                index += 1
+            if message._successRegex.startswith(self.FAILURE_REGEX_SERIALIZE_CODE):
+                regex = message._successRegex[len(self.FAILURE_REGEX_SERIALIZE_CODE):]
+                failureRegexMode=True
+            else:
+                regex = message._successRegex
+                failureRegexMode=False
+            messageEntry = RequestResponseStored(extender, message._host, message._port, message._protocol, message._requestData)
+            self.arrayOfMessages.add(MessageEntry(
+                message._index,
+                message._tableRow,
+                messageEntry,
+                message._url, message._name, message._roles, regex, message._deleted, failureRegexMode))
 
         self.lock.release()
 
@@ -1035,14 +1025,15 @@ class MessageTableModel(AbstractTableModel):
         else:
             roleIndex = self._db.getRoleByMessageTableColumn(col)._index
             messageEntry.addRoleByIndex(roleIndex,val)
-        messageEntry.clearResults()
-        self.fireTableCellUpdated(row,col)
-        # Update the chekbox colors since the results were deleted
-        for i in range(self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT, self.getColumnCount()):
-            self.fireTableCellUpdated(row,i)
-        # Backup option
-        # Update entire table since it affects color
-        # self.fireTableDataChanged()
+        if col >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
+            messageEntry.clearResults()
+            self.fireTableCellUpdated(row,col)
+            # Update the chekbox colors since the results were deleted
+            for i in range(self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT, self.getColumnCount()):
+                self.fireTableCellUpdated(row,i)
+            # Backup option
+            # Update entire table since it affects color
+            # self.fireTableDataChanged()
 
     # Set checkboxes editable
     def isCellEditable(self, row, col):
@@ -1065,12 +1056,15 @@ class MessageTable(JTable):
     def __init__(self, extender, model):
         self._extender = extender
         self.setModel(model)
+        self._viewerMap = {}
         return
     
     def changeSelection(self, row, col, toggle, extend):
-    
         # show the message entry for the selected row
         selectedMessage = self.getModel()._db.getMessageByRow(row)
+
+        # Update messages with any user edits to original requests:
+        self.updateMessages()
         self._extender._tabs.removeAll()
 
         # NOTE: testing if .locked is ok here since its a manual operation
@@ -1081,7 +1075,7 @@ class MessageTable(JTable):
 
         # Create original Request tab and set default tab to Request
         # Then Create test tabs and set the default tab to Response for easy analysis
-        originalTab = self.createRequestTabs(selectedMessage._requestResponse)
+        originalTab = self.createRequestTabs(selectedMessage._requestResponse, True, selectedMessage._index)
         originalTab.setSelectedIndex(0)
         self._extender._tabs.addTab("Original",originalTab)
         for userIndex in selectedMessage._userRuns.keys():
@@ -1096,18 +1090,20 @@ class MessageTable(JTable):
         JTable.changeSelection(self, row, col, toggle, extend)
         return
 
-    def createRequestTabs(self, requestResponse):
+    def createRequestTabs(self, requestResponse, original=False, index=-1):
         requestTabs = JTabbedPane()
-        requestViewer = self._extender._callbacks.createMessageEditor(self._extender, False)
+        requestViewer = self._extender._callbacks.createMessageEditor(self._extender, original)
         responseViewer = self._extender._callbacks.createMessageEditor(self._extender, False)
         requestTabs.addTab("Request", requestViewer.getComponent())
         requestTabs.addTab("Response", responseViewer.getComponent())
         self._extender._callbacks.customizeUiComponent(requestTabs)
-        # NOTE: consider adding the results when clicking the tab (lazy instantiation) since it can get slow
         requestViewer.setMessage(requestResponse.getRequest(), True)
         if requestResponse.getResponse():
             responseViewer.setMessage(requestResponse.getResponse(), False)
             requestTabs.setSelectedIndex(1)
+
+        if original and index>=0:
+            self._viewerMap[index] = requestViewer
 
         return requestTabs
 
@@ -1121,6 +1117,17 @@ class MessageTable(JTable):
         self.getColumnModel().getColumn(0).setMaxWidth(30);
         self.getColumnModel().getColumn(1).setMinWidth(300);
         self.getColumnModel().getColumn(2).setMinWidth(150);
+
+    def updateMessages(self):
+        # For now it sounds like this does not need to be locked, since its only manual operations
+        for messageIndex in self._viewerMap:
+            requestViewer = self._viewerMap[messageIndex]
+            if requestViewer and requestViewer.isMessageModified():
+                messageEntry = self.getModel()._db.arrayOfMessages[messageIndex]
+                newMessage = requestViewer.getMessage()
+                messageEntry._requestResponse = RequestResponseStored(self._extender, request=newMessage, httpService=messageEntry._requestResponse.getHttpService())                
+        self._viewerMap = {}
+
 
 # For color-coding checkboxes in the message table
 class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
@@ -1360,3 +1367,74 @@ class MessageEntryData:
         self._successRegex = successRegex
         self._deleted = deleted
         return
+
+##
+## RequestResponse Implementation
+##
+
+class RequestResponseStored(IHttpRequestResponse):
+
+    def __init__(self, extender, host=None, port=None, protocol=None, request=None, response=None, comment=None, highlight=None, httpService=None, requestResponse=None):
+        self._extender=extender
+        self._host=host
+        self._port=port
+        self._protocol=protocol
+        self._request=request
+        self._response=response
+        self._comment=comment
+        self._highlight=highlight
+        if httpService:
+            self.setHttpService(httpService)
+        if requestResponse:
+            self.cast(requestResponse)
+        return
+
+    def getComment(self):
+        return self._comment
+
+    def getHighlight(self):
+        return self._highlight
+
+    def getHttpService(self):
+        service = self._extender._helpers.buildHttpService(self._host, self._port, self._protocol)
+        if service:
+            return service
+        return None
+
+    def getRequest(self):
+        return self._request
+
+    def getResponse(self):
+        return self._response
+
+    def setComment(self, comment):
+        self._comment = comment
+        return
+
+    def setHighlight(self, color):
+        self._highlight = color
+        return
+
+    def setHttpService(self, httpService):
+        self._host=httpService.getHost()
+        self._port=httpService.getPort()
+        self._protocol=httpService.getProtocol()
+        return
+
+    def setRequest(self, message):
+        self._request = message
+        return
+
+    def setResponse(self, message):
+        self._response = message
+        return
+
+    def cast(self, requestResponse):
+        self.setComment(requestResponse.getComment())
+        self.setHighlight(requestResponse.getHighlight())
+        self.setHttpService(requestResponse.getHttpService())
+        self.setRequest(requestResponse.getRequest())
+        self.setResponse(requestResponse.getResponse())
+
+
+
