@@ -81,6 +81,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._fc = JFileChooser()        
 
         # Used by ActionListeners
+        # TODO: can these be removed by instantiating action listeners with variables?
         selfExtender = self
         self._selectedColumn = -1
         self._selectedRow = -1
@@ -155,19 +156,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._selectedColumn = -1
                     selfExtender._userTable.redrawTable()
 
-        # TODO combine these next two classes
-        class actionRemoveRoleHeaderFromMessageTable(ActionListener):
-            def actionPerformed(self,e):
-                if selfExtender._selectedColumn >= 0:
-                    selfExtender._db.deleteRole(selfExtender._db.getRoleByColumn(selfExtender._selectedColumn, 'm')._index)
-                    selfExtender._selectedColumn = -1
-                    selfExtender._userTable.redrawTable()
-                    selfExtender._messageTable.redrawTable()
+        class actionRemoveRole(ActionListener):
 
-        class actionRemoveRoleHeaderFromUserTable(ActionListener):
+            def __init__(self, table):
+                self._table = table
+
             def actionPerformed(self,e):
                 if selfExtender._selectedColumn >= 0:
-                    selfExtender._db.deleteRole(selfExtender._db.getRoleByColumn(selfExtender._selectedColumn, 'u')._index)
+                    selfExtender._db.deleteRole(selfExtender._db.getRoleByColumn(selfExtender._selectedColumn, self._table)._index)
                     selfExtender._selectedColumn = -1
                     selfExtender._userTable.redrawTable()
                     selfExtender._messageTable.redrawTable()
@@ -182,7 +178,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     for m in messages:
                         m.setFailureRegex(not m.isFailureRegex())
                         m.clearResults()
-                    # TODO why is this selected column?
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
 
@@ -209,7 +204,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             request = self.replaceDomain(m._requestResponse.getRequest(), m._requestResponse.getHttpService().getHost(), host)
                             m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request)
                             m.clearResults()
-                    # TODO why is this selected column?
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
 
@@ -234,7 +228,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         messageHeaderPopup = JPopupMenu()
         addPopup(self._messageTable.getTableHeader(),messageHeaderPopup)
         roleRemoveFromMessageTable = JMenuItem("Remove Role")
-        roleRemoveFromMessageTable.addActionListener(actionRemoveRoleHeaderFromMessageTable())
+        roleRemoveFromMessageTable.addActionListener(actionRemoveRole("m"))
         messageHeaderPopup.add(roleRemoveFromMessageTable)
 
         # User Table popup
@@ -247,7 +241,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         userHeaderPopup = JPopupMenu()
         addPopup(self._userTable.getTableHeader(),userHeaderPopup)
         roleRemoveFromUserTable = JMenuItem("Remove Role")
-        roleRemoveFromUserTable.addActionListener(actionRemoveRoleHeaderFromUserTable())
+        roleRemoveFromUserTable.addActionListener(actionRemoveRole("u"))
         userHeaderPopup.add(roleRemoveFromUserTable)
 
         # Top pane
