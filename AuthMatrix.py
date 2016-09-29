@@ -705,7 +705,6 @@ class MatrixDB():
             roleIndex = self.arrayOfRoles.size()
             self.arrayOfRoles.add(RoleEntry(roleIndex,
                 roleIndex - self.deletedRoleCount,
-                roleIndex - self.deletedRoleCount,
                 role))
 
             # Add new role to each existing user as unchecked
@@ -769,8 +768,7 @@ class MatrixDB():
         for role in db.arrayOfRoles:
             self.arrayOfRoles.add(RoleEntry(
                 role._index,
-                role._mTableColumn-3, # TODO this is with a state compatibility bug
-                role._uTableColumn-3, # TODO this is with a state compatibility bug
+                role._mTableColumn-3, # NOTE this is done to preserve compatability with older state files
                 role._name,
                 role._deleted))
         
@@ -780,8 +778,6 @@ class MatrixDB():
             header = "" if len(token)==1 else token[1]
             name = "" if not user._name else user._name
             postarg = "" if not user._staticcsrf else user._staticcsrf
-            #print "name "+name+", cookies "+cookies+", headers "+header+", deleted "+str(user._deleted)
-            #print "index"+str(user._index)+", tablerow "+str(user._tableRow)+ ", csrf "+str(user._staticcsrf)
             self.arrayOfUsers.add(UserEntry(
                 int(user._index),
                 int(user._tableRow),
@@ -815,8 +811,8 @@ class MatrixDB():
         for role in self.arrayOfRoles:
             serializedRoles.append(RoleEntryData(
                 role._index,
-                role._mTableColumn+3, # TODO this is with a state compatibility bug
-                role._uTableColumn+3, # TODO this is with a state compatibility bug
+                role._column+3, # NOTE this is done to preserve compatability with older state files
+                role._column+3, # NOTE this is done to preserve compatability with older state files
                 role._name,
                 role._deleted))
         for user in self.arrayOfUsers:
@@ -859,12 +855,12 @@ class MatrixDB():
 
     def getRoleByMessageTableColumn(self, column):
         for r in self.arrayOfRoles:
-            if not r.isDeleted() and r.getMTableColumn()+self.STATIC_MESSAGE_TABLE_COLUMN_COUNT == column:
+            if not r.isDeleted() and r.getColumn()+self.STATIC_MESSAGE_TABLE_COLUMN_COUNT == column:
                 return r
 
     def getRoleByUserTableColumn(self, column):
         for r in self.arrayOfRoles:
-            if not r.isDeleted() and r.getUTableColumn()+self.STATIC_USER_TABLE_COLUMN_COUNT == column:
+            if not r.isDeleted() and r.getColumn()+self.STATIC_USER_TABLE_COLUMN_COUNT == column:
                 return r
 
     def deleteUser(self,userIndex):
@@ -886,8 +882,7 @@ class MatrixDB():
             self.deletedRoleCount += 1
             if len(self.arrayOfRoles) > roleIndex+1:
                 for i in self.arrayOfRoles[roleIndex+1:]:
-                    i.updateMTableColumn(i.getMTableColumn()-1)
-                    i.updateUTableColumn(i.getUTableColumn()-1)
+                    i.updateColumn(i.getColumn()-1)
         self.lock.release()
 
     def deleteMessage(self,messageIndex):
@@ -1360,30 +1355,23 @@ class UserEntry:
 
 class RoleEntry:
 
-    def __init__(self,index,mTableColumnIndex,uTableColumnIndex,name,deleted=False):
+    def __init__(self,index,columnIndex,name,deleted=False):
         self._index = index
         self._name = name
         self._deleted = deleted
-        self._mTableColumn = mTableColumnIndex
-        self._uTableColumn = uTableColumnIndex
+        self._column = columnIndex
         return
 
     def isDeleted(self):
         return self._deleted
 
-    # NOTE: in v0.6 these values was changed to dynamic column index
+    # NOTE: in v0.6 this value was changed to index into the dynamic columns only
 
-    def updateMTableColumn(self, column):
-        self._mTableColumn = column
+    def updateColumn(self, column):
+        self._column = column
 
-    def getMTableColumn(self):
-        return self._mTableColumn
-
-    def updateUTableColumn(self, column):
-        self._uTableColumn = column
-
-    def getUTableColumn(self):
-        return self._uTableColumn
+    def getColumn(self):
+        return self._column
 
 ##
 ## SERIALIZABLE CLASSES
