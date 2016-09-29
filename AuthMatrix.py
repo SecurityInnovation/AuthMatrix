@@ -159,7 +159,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         class actionRemoveRoleHeaderFromMessageTable(ActionListener):
             def actionPerformed(self,e):
                 if selfExtender._selectedColumn >= 0:
-                    selfExtender._db.deleteRole(selfExtender._db.getRoleByMessageTableColumn(selfExtender._selectedColumn)._index)
+                    selfExtender._db.deleteRole(selfExtender._db.getRoleByColumn(selfExtender._selectedColumn, 'm')._index)
                     selfExtender._selectedColumn = -1
                     selfExtender._userTable.redrawTable()
                     selfExtender._messageTable.redrawTable()
@@ -167,7 +167,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         class actionRemoveRoleHeaderFromUserTable(ActionListener):
             def actionPerformed(self,e):
                 if selfExtender._selectedColumn >= 0:
-                    selfExtender._db.deleteRole(selfExtender._db.getRoleByUserTableColumn(selfExtender._selectedColumn)._index)
+                    selfExtender._db.deleteRole(selfExtender._db.getRoleByColumn(selfExtender._selectedColumn, 'u')._index)
                     selfExtender._selectedColumn = -1
                     selfExtender._userTable.redrawTable()
                     selfExtender._messageTable.redrawTable()
@@ -634,7 +634,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     print "ERROR: Request failed or timed out during Run"
                     return False
                 resp = StringUtil.fromBytes(response)
-                found = re.search(messageEntry._successRegex, resp, re.DOTALL)
+                found = re.search(messageEntry._regex, resp, re.DOTALL)
 
                 shouldSucceed = roleIndex in activeCheckBoxedRoles
                 succeed = found if shouldSucceed else not found
@@ -773,7 +773,7 @@ class MatrixDB():
                 role._deleted))
         
         for user in db.arrayOfUsers:
-            token = user._token.split(self.COOKIE_HEADER_SERIALIZE_CODE)
+            token = [""] if not user._token else user._token.split(self.COOKIE_HEADER_SERIALIZE_CODE)
             cookies = token[0]
             header = "" if len(token)==1 else token[1]
             name = "" if not user._name else user._name
@@ -799,7 +799,7 @@ class MatrixDB():
         serializedRoles = []
         serializedUsers = []
         for message in self.arrayOfMessages:
-            regex = self.FAILURE_REGEX_SERIALIZE_CODE+message._successRegex if message.isFailureRegex() else message._successRegex
+            regex = self.FAILURE_REGEX_SERIALIZE_CODE+message._regex if message.isFailureRegex() else message._regex
             serializedMessages.append(MessageEntryData(
                 message._index, 
                 message._tableRow,
@@ -853,14 +853,10 @@ class MatrixDB():
             if not u.isDeleted() and u.getTableRow() == row:
                 return u
 
-    def getRoleByMessageTableColumn(self, column):
+    def getRoleByColumn(self,column, table):
+        staticcount = self.STATIC_MESSAGE_TABLE_COLUMN_COUNT if table == "m" else self.STATIC_USER_TABLE_COLUMN_COUNT
         for r in self.arrayOfRoles:
-            if not r.isDeleted() and r.getColumn()+self.STATIC_MESSAGE_TABLE_COLUMN_COUNT == column:
-                return r
-
-    def getRoleByUserTableColumn(self, column):
-        for r in self.arrayOfRoles:
-            if not r.isDeleted() and r.getColumn()+self.STATIC_USER_TABLE_COLUMN_COUNT == column:
+            if not r.isDeleted() and r.getColumn()+staticcount == column:
                 return r
 
     def deleteUser(self,userIndex):
@@ -926,7 +922,7 @@ class UserTableModel(AbstractTableModel):
         elif columnIndex == 3:
             return "HTTP Parameter (CSRF)"
         else:
-            roleEntry = self._db.getRoleByUserTableColumn(columnIndex)
+            roleEntry = self._db.getRoleByColumn(columnIndex, 'u')
             if roleEntry:
                 return roleEntry._name
         return ""
@@ -943,7 +939,7 @@ class UserTableModel(AbstractTableModel):
             elif columnIndex == 3:
                 return str(userEntry._postargs)
             else:
-                roleEntry = self._db.getRoleByUserTableColumn(columnIndex)
+                roleEntry = self._db.getRoleByColumn(columnIndex, 'u')
                 if roleEntry:
                     roleIndex = roleEntry._index
                     return roleIndex in userEntry._roles and userEntry._roles[roleIndex]
@@ -967,7 +963,7 @@ class UserTableModel(AbstractTableModel):
             elif col == 3:
                 userEntry._postargs = val
             else:
-                roleIndex = self._db.getRoleByUserTableColumn(col)._index
+                roleIndex = self._db.getRoleByColumn(col, 'u')._index
                 userEntry.addRoleByIndex(roleIndex, val)
 
         self.fireTableCellUpdated(row,col)
@@ -1035,7 +1031,7 @@ class MessageTableModel(AbstractTableModel):
         elif columnIndex == 2:
             return "Response Regex"
         else:
-            roleEntry = self._db.getRoleByMessageTableColumn(columnIndex)
+            roleEntry = self._db.getRoleByColumn(columnIndex, 'm')
             if roleEntry:
                 return roleEntry._name
         return ""
@@ -1048,9 +1044,9 @@ class MessageTableModel(AbstractTableModel):
             elif columnIndex == 1:
                 return messageEntry._name
             elif columnIndex == 2:
-                return messageEntry._successRegex
+                return messageEntry._regex
             else:
-                roleEntry = self._db.getRoleByMessageTableColumn(columnIndex)
+                roleEntry = self._db.getRoleByColumn(columnIndex, 'm')
                 if roleEntry:
                     roleIndex = roleEntry._index
                     return roleIndex in messageEntry._roles and messageEntry._roles[roleIndex]
@@ -1067,9 +1063,9 @@ class MessageTableModel(AbstractTableModel):
         if col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-2:
             messageEntry._name = val
         elif col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
-            messageEntry._successRegex = val
+            messageEntry._regex = val
         else:
-            roleIndex = self._db.getRoleByMessageTableColumn(col)._index
+            roleIndex = self._db.getRoleByColumn(col, 'm')._index
             messageEntry.addRoleByIndex(roleIndex,val)
         if col >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
             messageEntry.clearResults()
@@ -1201,7 +1197,7 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
         if column >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT:
             messageEntry = self._db.getMessageByRow(row)
             if messageEntry:
-                roleEntry = self._db.getRoleByMessageTableColumn(column)
+                roleEntry = self._db.getRoleByColumn(column, 'm')
                 if roleEntry:
                     roleIndex = roleEntry._index
                     if not roleIndex in messageEntry._roleResults:
@@ -1288,8 +1284,7 @@ class MessageEntry:
         self._name = url.getPath() if not name else name
         self._roles = roles.copy()
         self._failureRegexMode = failureRegexMode
-        # TODO: rename this to just Regex
-        self._successRegex = regex
+        self._regex = regex
         self._deleted = deleted
         self._userRuns = {}
         self._roleResults = {}
@@ -1304,7 +1299,6 @@ class MessageEntry:
         self._userRuns[userIndex] = requestResponse
 
     def setRoleResultByRoleIndex(self, roleIndex, roleResult):
-        # NOTE: maybe make this where its calculated
         self._roleResults[roleIndex] = roleResult
 
     def isDeleted(self):
@@ -1415,6 +1409,7 @@ class RoleEntryData:
         self._index = index
         self._name = name
         self._deleted = deleted
+        # NOTE: to preserve backwords compatibility, these will be the dynamic column +3
         self._mTableColumn = mTableColumnIndex
         self._uTableColumn = uTableColumnIndex
         return
