@@ -201,7 +201,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
 
                     ok, host, port, tls = selfExtender.changeDomainPopup()
-                    if ok:
+                    if ok and host:
                         if not port:
                             port = 443 if tls else 80
                         for m in messages:
@@ -659,6 +659,7 @@ class MatrixDB():
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.LOAD_TIMEOUT = 3.0
         self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
+        self.COOKIE_HEADER_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
         self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
 
         self.lock = Lock()
@@ -703,8 +704,8 @@ class MatrixDB():
         if roleIndex < 0:
             roleIndex = self.arrayOfRoles.size()
             self.arrayOfRoles.add(RoleEntry(roleIndex,
-                roleIndex + self.STATIC_MESSAGE_TABLE_COLUMN_COUNT - self.deletedRoleCount,
-                roleIndex + self.STATIC_USER_TABLE_COLUMN_COUNT - self.deletedRoleCount,
+                roleIndex - self.deletedRoleCount,
+                roleIndex - self.deletedRoleCount,
                 role))
 
             # Add new role to each existing user as unchecked
@@ -744,12 +745,12 @@ class MatrixDB():
 
     def load(self, db, extender):
         self.lock.acquire()
-        self.arrayOfRoles = db.arrayOfRoles
-        self.arrayOfUsers = db.arrayOfUsers
+        self.arrayOfUsers = ArrayList()
+        self.arrayOfRoles = ArrayList()
+        self.arrayOfMessages = ArrayList()
         self.deletedUserCount = db.deletedUserCount
         self.deletedRoleCount = db.deletedRoleCount
         self.deletedMessageCount = db.deletedMessageCount
-        self.arrayOfMessages = ArrayList()
 
         for message in db.arrayOfMessages:
             if message._successRegex.startswith(self.FAILURE_REGEX_SERIALIZE_CODE):
@@ -765,6 +766,32 @@ class MatrixDB():
                 messageEntry,
                 message._url, message._name, message._roles, regex, message._deleted, failureRegexMode))
 
+        for role in db.arrayOfRoles:
+            self.arrayOfRoles.add(RoleEntry(
+                role._index,
+                role._mTableColumn-3, # TODO this is with a state compatibility bug
+                role._uTableColumn-3, # TODO this is with a state compatibility bug
+                role._name,
+                role._deleted))
+        
+        for user in db.arrayOfUsers:
+            token = user._token.split(self.COOKIE_HEADER_SERIALIZE_CODE)
+            cookies = token[0]
+            header = "" if len(token)==1 else token[1]
+            name = "" if not user._name else user._name
+            postarg = "" if not user._staticcsrf else user._staticcsrf
+            #print "name "+name+", cookies "+cookies+", headers "+header+", deleted "+str(user._deleted)
+            #print "index"+str(user._index)+", tablerow "+str(user._tableRow)+ ", csrf "+str(user._staticcsrf)
+            self.arrayOfUsers.add(UserEntry(
+                int(user._index),
+                int(user._tableRow),
+                name,
+                user._roles,
+                user._deleted,
+                cookies,
+                header,
+                postarg))
+
         self.lock.release()
 
     
@@ -773,6 +800,8 @@ class MatrixDB():
         # NOTE: might not need locks?
         self.lock.acquire()
         serializedMessages = []
+        serializedRoles = []
+        serializedUsers = []
         for message in self.arrayOfMessages:
             regex = self.FAILURE_REGEX_SERIALIZE_CODE+message._successRegex if message.isFailureRegex() else message._successRegex
             serializedMessages.append(MessageEntryData(
@@ -783,7 +812,29 @@ class MatrixDB():
                 message._requestResponse.getHttpService().getPort(),
                 message._requestResponse.getHttpService().getProtocol(),
                 message._url, message._name, message._roles, regex, message._deleted))
-        ret = MatrixDBData(serializedMessages,self.arrayOfRoles, self.arrayOfUsers, self.deletedUserCount, self.deletedRoleCount, self.deletedMessageCount)
+        for role in self.arrayOfRoles:
+            serializedRoles.append(RoleEntryData(
+                role._index,
+                role._mTableColumn+3, # TODO this is with a state compatibility bug
+                role._uTableColumn+3, # TODO this is with a state compatibility bug
+                role._name,
+                role._deleted))
+        for user in self.arrayOfUsers:
+            cookies = user._cookies if user._cookies else ""
+            header = user._header if user._header else ""
+            name = user._name if user._name else ""
+            postargs = user._postargs if user._postargs else ""
+            token = cookies + self.COOKIE_HEADER_SERIALIZE_CODE + header
+            serializedUsers.append(UserEntryData(
+                user._index,
+                user._tableRow,
+                name,
+                user._roles,
+                user._deleted,
+                token,
+                postargs))
+
+        ret = MatrixDBData(serializedMessages,serializedRoles, serializedUsers, self.deletedUserCount, self.deletedRoleCount, self.deletedMessageCount)
         self.lock.release()
         return ret
 
@@ -808,12 +859,12 @@ class MatrixDB():
 
     def getRoleByMessageTableColumn(self, column):
         for r in self.arrayOfRoles:
-            if not r.isDeleted() and r.getMTableColumn() == column:
+            if not r.isDeleted() and r.getMTableColumn()+self.STATIC_MESSAGE_TABLE_COLUMN_COUNT == column:
                 return r
 
     def getRoleByUserTableColumn(self, column):
         for r in self.arrayOfRoles:
-            if not r.isDeleted() and r.getUTableColumn() == column:
+            if not r.isDeleted() and r.getUTableColumn()+self.STATIC_USER_TABLE_COLUMN_COUNT == column:
                 return r
 
     def deleteUser(self,userIndex):
@@ -891,11 +942,11 @@ class UserTableModel(AbstractTableModel):
             if columnIndex == 0:
                 return str(userEntry._name)
             elif columnIndex == 1:
-                return userEntry._cookies
+                return str(userEntry._cookies)
             elif columnIndex == 2:
-                return userEntry._header
+                return str(userEntry._header)
             elif columnIndex == 3:
-                return userEntry._postargs
+                return str(userEntry._postargs)
             else:
                 roleEntry = self._db.getRoleByUserTableColumn(columnIndex)
                 if roleEntry:
@@ -998,7 +1049,7 @@ class MessageTableModel(AbstractTableModel):
         messageEntry = self._db.getMessageByRow(rowIndex)
         if messageEntry:
             if columnIndex == 0:
-                return str(messageEntry.getTableRow())
+                return str(messageEntry._index)
             elif columnIndex == 1:
                 return messageEntry._name
             elif columnIndex == 2:
@@ -1283,15 +1334,15 @@ class MessageEntry:
 
 class UserEntry:
 
-    def __init__(self, index, rowIndex, name):
+    def __init__(self, index, tableRow, name, roles = {}, deleted=False, cookies="", header="", postargs=""):
         self._index = index
         self._name = name
-        self._roles = {}
-        self._deleted = False
-        self._tableRow = rowIndex
-        self._cookies = ""
-        self._header = ""
-        self._postargs = ""
+        self._roles = roles
+        self._deleted = deleted
+        self._tableRow = tableRow
+        self._cookies = cookies
+        self._header = header
+        self._postargs = postargs
         return
 
     # Roles are the index of the db role array and a bool for whether the checkbox is default enabled or not
@@ -1309,16 +1360,18 @@ class UserEntry:
 
 class RoleEntry:
 
-    def __init__(self,index,mTableColumnIndex,uTableColumnIndex,name):
+    def __init__(self,index,mTableColumnIndex,uTableColumnIndex,name,deleted=False):
         self._index = index
         self._name = name
-        self._deleted = False
+        self._deleted = deleted
         self._mTableColumn = mTableColumnIndex
         self._uTableColumn = uTableColumnIndex
         return
 
     def isDeleted(self):
         return self._deleted
+
+    # NOTE: in v0.6 these values was changed to dynamic column index
 
     def updateMTableColumn(self, column):
         self._mTableColumn = column
@@ -1366,6 +1419,28 @@ class MessageEntryData:
         # NOTE: to preserve backwords compatability, successregex will have a specific prefix "|AMFAILURE|" to indicate FailureRegexMode
         self._successRegex = successRegex
         self._deleted = deleted
+        return
+
+class RoleEntryData:
+
+    def __init__(self,index,mTableColumnIndex,uTableColumnIndex,name,deleted):
+        self._index = index
+        self._name = name
+        self._deleted = deleted
+        self._mTableColumn = mTableColumnIndex
+        self._uTableColumn = uTableColumnIndex
+        return
+
+class UserEntryData:
+
+    def __init__(self, index, tableRow, name, roles, deleted, token, staticcsrf):
+        self._index = index
+        self._name = name
+        self._roles = roles
+        self._deleted = deleted
+        self._tableRow = tableRow
+        self._token = token
+        self._staticcsrf = staticcsrf
         return
 
 ##
