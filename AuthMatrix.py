@@ -485,7 +485,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self.clearColorResults(indexes)
             for index in indexes:
                 self.runMessage(index)
-                #self.colorCodeResults()
         except:
             traceback.print_exc(file=self._callbacks.getStderr())
         finally:
@@ -566,6 +565,23 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
     def runMessage(self, messageIndex):
+
+        # TODO: this uses hacky threading tricks for handling timeouts, find a better way
+        tempRequestResponse = []
+        index = 0
+        def loadRequestResponse(index, service, message):
+            # NOTE: tempRequestResponse is an array because of a threading issue,
+            # where if this thread times out, it will still update temprequestresponse later on..
+            try:
+                tempRequestResponse[index] = self._callbacks.makeHttpRequest(service,message)
+            except java.lang.RuntimeException:
+                # Catches if there is a bad host
+                # TODO there may sometimes be an unhandled exception thrown in the stack trace here?
+                print "Runtime Exception"
+                return
+            except:
+                traceback.print_exc(file=callbacks.getStderr())
+
         messageEntry = self._db.arrayOfMessages[messageIndex]
         messageEntry.clearResults()
 
@@ -574,14 +590,22 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         reqBody = messageInfo.getRequest()[requestInfo.getBodyOffset():]
         for userIndex in self._db.getActiveUserIndexes():
             userEntry = self._db.arrayOfUsers[userIndex]
-            
             newHeaders = self.getNewHeaders(requestInfo, userEntry._cookies, userEntry._header)
             newBody = self.getNewBody(requestInfo, reqBody, userEntry._postargs)
-
             # Construct and send a message with the new headers
             message = self._helpers.buildHttpMessage(newHeaders, newBody)
-            requestResponse = self._callbacks.makeHttpRequest(messageInfo.getHttpService(),message)
-            messageEntry.addRunByUserIndex(userIndex, self._callbacks.saveBuffersToTempFiles(requestResponse))
+
+            # Run with threading to timeout correctly   
+            tempRequestResponse.append(None)         
+            t = Thread(target=loadRequestResponse, args = [index,messageInfo.getHttpService(),message])
+            t.start()
+            t.join(self._db.LOAD_TIMEOUT)
+            if t.isAlive():
+                print "ERROR: Request Timeout"
+            requestResponse = tempRequestResponse[index]
+            if requestResponse:
+                messageEntry.addRunByUserIndex(userIndex, self._callbacks.saveBuffersToTempFiles(requestResponse))
+            index +=1
 
         # Grab all active roleIndexes that are checkboxed
         activeCheckBoxedRoles = [index for index in messageEntry._roles.keys() if messageEntry._roles[index] and not self._db.arrayOfRoles[index].isDeleted()]
@@ -618,14 +642,16 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 for index in self._db.getActiveRoleIndexes():
                     if not index == roleIndex and userEntry._roles[index]:
                         if (index in activeCheckBoxedRoles and not messageEntry.isFailureRegex()) or (index not in activeCheckBoxedRoles and messageEntry.isFailureRegex()):
-                            #print str(roleIndex)+":"+userEntry._name+":"+str(index)
                             ignoreUser = True
 
             if not ignoreUser:
+                if not userEntry._index in messageEntry._userRuns:
+                    print "ERROR: HTTP Requests Failed During Run"
+                    return False
                 requestResponse = messageEntry._userRuns[userEntry._index]
                 response = requestResponse.getResponse()
                 if not response:
-                    print "ERROR: Request failed or timed out during Run"
+                    print "ERROR: No HTTP Response (Likely Invalid Target Host)"
                     return False
                 resp = StringUtil.fromBytes(response)
                 found = re.search(messageEntry._regex, resp, re.DOTALL)
