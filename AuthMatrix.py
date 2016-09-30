@@ -473,7 +473,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     ##
 
     def runMessagesThread(self, messageIndexes=None):
-        # TODO timeout run
         self._db.lock.acquire()
         try:
             # Update original requests with any user changes
@@ -483,8 +482,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             if not indexes:
                 indexes = self._db.getActiveMessageIndexes()
             self.clearColorResults(indexes)
-            for index in indexes:
-                self.runMessage(index)
+            # Run in order of row, not by index
+            for message in self._db.getMessagesInOrderByRow():
+                if message._index in indexes:
+                    self.runMessage(message._index)
+            #for index in indexes:
+            #    self.runMessage(index)
         except:
             traceback.print_exc(file=self._callbacks.getStderr())
         finally:
@@ -863,6 +866,15 @@ class MatrixDB():
     def getActiveMessageIndexes(self):
         return [x._index for x in self.arrayOfMessages if not x.isDeleted()]
 
+    def getActiveUserCount(self):
+        return self.arrayOfUsers.size()-self.deletedUserCount
+
+    def getActiveRoleCount(self):
+        return self.arrayOfRoles.size()-self.deletedRoleCount
+
+    def getActiveMessageCount(self):
+        return self.arrayOfMessages.size()-self.deletedMessageCount
+
     def getMessageByRow(self, row):
         for m in self.arrayOfMessages:
             if not m.isDeleted() and m.getTableRow() == row:
@@ -886,6 +898,8 @@ class MatrixDB():
             userEntry._deleted = True
             self.deletedUserCount += 1
             if len(self.arrayOfUsers) > userIndex+1:
+                # Note: this assumes that row is in order of index
+                # TODOv06 updatetablerow instead
                 for i in self.arrayOfUsers[userIndex+1:]:
                     i._tableRow -= 1
         self.lock.release()
@@ -897,10 +911,12 @@ class MatrixDB():
             roleEntry._deleted = True
             self.deletedRoleCount += 1
             if len(self.arrayOfRoles) > roleIndex+1:
+                # Note: this assumes that column is in order of index
                 for i in self.arrayOfRoles[roleIndex+1:]:
                     i.updateColumn(i.getColumn()-1)
         self.lock.release()
 
+    # TODOv06, this might screw up once indexes arent in order
     def deleteMessage(self,messageIndex):
         self.lock.acquire()
         messageEntry = self.arrayOfMessages[messageIndex]
@@ -908,9 +924,17 @@ class MatrixDB():
             messageEntry._deleted = True
             self.deletedMessageCount += 1
             if len(self.arrayOfMessages) > messageIndex+1:
+                # Note: this assumes that row is in order of index
+                # TODOv06 updatetablerow instead
                 for i in self.arrayOfMessages[messageIndex+1:]:
                     i._tableRow -= 1
         self.lock.release()
+
+    def getMessagesInOrderByRow(self):
+        messages = []
+        for i in range(self.getActiveMessageCount()):
+            messages.append(self.getMessageByRow(i))
+        return messages
 
     # NOTE: If this method is unused, probably remove it?
     def getUserEntriesWithinRole(self, roleIndex):
@@ -927,10 +951,11 @@ class UserTableModel(AbstractTableModel):
         self._db = db
 
     def getRowCount(self):
-        return len(self._db.getActiveUserIndexes())
+        return self._db.getActiveUserCount()
 
     def getColumnCount(self):
-        return len(self._db.getActiveRoleIndexes())+self._db.STATIC_USER_TABLE_COLUMN_COUNT
+        return self._db.getActiveRoleCount()+self._db.STATIC_USER_TABLE_COLUMN_COUNT
+
         
     def getColumnName(self, columnIndex):
         if columnIndex == 0:
@@ -1038,10 +1063,10 @@ class MessageTableModel(AbstractTableModel):
         self._db = db
 
     def getRowCount(self):
-        return len(self._db.getActiveMessageIndexes())
+        return self._db.getActiveMessageCount()
         
     def getColumnCount(self):
-        return self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT+len(self._db.getActiveRoleIndexes())
+        return self._db.getActiveRoleCount()+self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT
 
     def getColumnName(self, columnIndex):
         if columnIndex == 0:
@@ -1087,10 +1112,11 @@ class MessageTableModel(AbstractTableModel):
         else:
             roleIndex = self._db.getRoleByColumn(col, 'm')._index
             messageEntry.addRoleByIndex(roleIndex,val)
+
+        # Update the checkbox result colors since there was a change
         if col >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
             messageEntry.clearResults()
             self.fireTableCellUpdated(row,col)
-            # Update the chekbox colors since the results were deleted
             for i in range(self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT, self.getColumnCount()):
                 self.fireTableCellUpdated(row,i)
             # Backup option
