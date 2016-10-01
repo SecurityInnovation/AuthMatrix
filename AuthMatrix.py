@@ -895,25 +895,30 @@ class MatrixDB():
         self.lock.acquire()
         userEntry = self.arrayOfUsers[userIndex]
         if userEntry:
-            userEntry._deleted = True
+            userEntry.setDeleted()
             self.deletedUserCount += 1
-            if len(self.arrayOfUsers) > userIndex+1:
-                # Note: this assumes that row is in order of index
-                # TODOv06 updatetablerow instead
-                for i in self.arrayOfUsers[userIndex+1:]:
-                    i._tableRow -= 1
+
+            previousRow = userEntry.getTableRow()
+            for i in self.getActiveUserIndexes():
+                user = self.arrayOfUsers[i]
+                if user.getTableRow()>previousRow:
+                    user.setTableRow(user.getTableRow()-1)
+
         self.lock.release()
 
     def deleteRole(self,roleIndex):
         self.lock.acquire()
         roleEntry = self.arrayOfRoles[roleIndex]
         if roleEntry:
-            roleEntry._deleted = True
+            roleEntry.setDeleted()
             self.deletedRoleCount += 1
-            if len(self.arrayOfRoles) > roleIndex+1:
-                # Note: this assumes that column is in order of index
-                for i in self.arrayOfRoles[roleIndex+1:]:
-                    i.updateColumn(i.getColumn()-1)
+
+            previousColumn = roleEntry.getColumn()
+            for i in self.getActiveRoleIndexes():
+                role = self.arrayOfRoles[i]
+                if role.getColumn()>previousColumn:
+                    role.setColumn(role.getColumn()-1)
+
         self.lock.release()
 
     # TODOv06, this might screw up once indexes arent in order
@@ -921,13 +926,15 @@ class MatrixDB():
         self.lock.acquire()
         messageEntry = self.arrayOfMessages[messageIndex]
         if messageEntry:
-            messageEntry._deleted = True
+            messageEntry.setDeleted()
             self.deletedMessageCount += 1
-            if len(self.arrayOfMessages) > messageIndex+1:
-                # Note: this assumes that row is in order of index
-                # TODOv06 updatetablerow instead
-                for i in self.arrayOfMessages[messageIndex+1:]:
-                    i._tableRow -= 1
+
+            previousRow = messageEntry.getTableRow()
+            for i in self.getActiveMessageIndexes():
+                message = self.arrayOfMessages[i]
+                if message.getTableRow()>previousRow:
+                    message.setTableRow(message.getTableRow()-1)
+
         self.lock.release()
 
     def getMessagesInOrderByRow(self):
@@ -935,10 +942,6 @@ class MatrixDB():
         for i in range(self.getActiveMessageCount()):
             messages.append(self.getMessageByRow(i))
         return messages
-
-    # NOTE: If this method is unused, probably remove it?
-    def getUserEntriesWithinRole(self, roleIndex):
-        return [userEntry for userEntry in self.arrayOfUsers if userEntry._roles[roleIndex]]
 
 
 ##
@@ -1347,10 +1350,13 @@ class MessageEntry:
     def setRoleResultByRoleIndex(self, roleIndex, roleResult):
         self._roleResults[roleIndex] = roleResult
 
+    def setDeleted(self):
+        self._deleted = True
+
     def isDeleted(self):
         return self._deleted
 
-    def updateTableRow(self, row):
+    def setTableRow(self, row):
         self._tableRow = row
 
     def getTableRow(self):
@@ -1384,10 +1390,13 @@ class UserEntry:
     def addRoleByIndex(self, roleIndex, enabled=False):
         self._roles[roleIndex] = enabled
 
+    def setDeleted(self):
+        self._deleted = True
+
     def isDeleted(self):
         return self._deleted
 
-    def updateTableRow(self, row):
+    def setTableRow(self, row):
         self._tableRow = row
 
     def getTableRow(self):
@@ -1402,12 +1411,14 @@ class RoleEntry:
         self._column = columnIndex
         return
 
+    def setDeleted(self):
+        self._deleted = True
+
     def isDeleted(self):
         return self._deleted
 
     # NOTE: in v0.6 this value was changed to index into the dynamic columns only
-
-    def updateColumn(self, column):
+    def setColumn(self, column):
         self._column = column
 
     def getColumn(self):
