@@ -45,6 +45,10 @@ from javax.swing import JLabel;
 from javax.swing import JFileChooser;
 from javax.swing import JPopupMenu;
 from javax.swing import JTextField;
+from javax.swing import TransferHandler;
+from javax.swing import DropMode;
+from java.awt.datatransfer import StringSelection;
+from java.awt.datatransfer import DataFlavor;
 from javax.swing.table import AbstractTableModel;
 from javax.swing.table import TableCellRenderer;
 from javax.swing.table import JTableHeader;
@@ -96,6 +100,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._messageTable = MessageTable(self, model = MessageTableModel(self._db))
         messageScrollPane = JScrollPane(self._messageTable)
         self._messageTable.redrawTable()
+
+        # Set Messages to reorderable
+        self._messageTable.setDragEnabled(True)
+        self._messageTable.setDropMode(DropMode.INSERT_ROWS)
+        self._messageTable.setTransferHandler(MessageTableRowTransferHandler(self._messageTable))                
 
 
         # Semi-Generic Popup stuff
@@ -921,7 +930,6 @@ class MatrixDB():
 
         self.lock.release()
 
-    # TODOv06, this might screw up once indexes arent in order
     def deleteMessage(self,messageIndex):
         self.lock.acquire()
         messageEntry = self.arrayOfMessages[messageIndex]
@@ -942,6 +950,21 @@ class MatrixDB():
         for i in range(self.getActiveMessageCount()):
             messages.append(self.getMessageByRow(i))
         return messages
+
+    def moveMessageToRow(self, fromRow, toRow):
+        self.lock.acquire()
+        messages = self.getMessagesInOrderByRow()
+        if fromRow > toRow:
+            messages[fromRow].setTableRow(toRow)
+            for i in range(toRow,fromRow):
+                messages[i].setTableRow(i+1)
+
+        elif toRow > fromRow:
+            messages[fromRow].setTableRow(toRow-1)
+            for i in range(fromRow+1,toRow):
+                messages[i].setTableRow(i-1)
+
+        self.lock.release()
 
 
 ##
@@ -1550,6 +1573,45 @@ class RequestResponseStored(IHttpRequestResponse):
         self.setHttpService(requestResponse.getHttpService())
         self.setRequest(requestResponse.getRequest())
         self.setResponse(requestResponse.getResponse())
+
+
+##
+## Drag and Drop
+##
+
+class MessageTableRowTransferHandler(TransferHandler):
+
+    def __init__(self, table):
+        self._table = table
+
+    def createTransferable(self, c):
+        assert(c == self._table)
+        return StringSelection(str(c.getSelectedRow()))
+
+    def getSourceActions(self, c):
+        return TransferHandler.COPY_OR_MOVE
+
+    def exportDone(self, c, t, act):
+        if act == TransferHandler.MOVE or act == TransferHandler.NONE:
+            self._table.redrawTable()
+
+
+    def canImport(self, info):
+        b = info.getComponent() == self._table and info.isDrop() and info.isDataFlavorSupported(DataFlavor.stringFlavor)
+        return b
+
+    def importData(self, info):
+        target = info.getComponent()
+        dl = info.getDropLocation()
+        index = dl.getRow()
+        tablemax = self._table.getModel().getRowCount()
+        if index < 0 or index > tablemax:
+            index = tablemax
+
+        rowFrom = info.getTransferable().getTransferData(DataFlavor.stringFlavor)
+        #print "Moving row "+str(rowFrom)+" to row "+str(index)
+        self._table.getModel()._db.moveMessageToRow(int(rowFrom), int(index))
+        return True
 
 
 
