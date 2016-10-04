@@ -862,10 +862,10 @@ class MatrixDB():
         self.lock.release()
         return messageIndex
 
-    def createNewChain(self):
+    def createNewChain(self, name):
         self.lock.acquire()
         chainIndex = self.arrayOfChains.size()
-        self.arrayOfChains.add(ChainEntry(chainIndex, chainIndex - self.deletedChainCount))
+        self.arrayOfChains.add(ChainEntry(chainIndex, chainIndex - self.deletedChainCount, name))
 
         self.lock.release()
         return chainIndex
