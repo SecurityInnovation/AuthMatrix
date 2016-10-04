@@ -489,6 +489,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._db.load(dbData,self)
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
+            self._chainTable.redrawTable()
 
     def clearClick(self,e):
         result = JOptionPane.showConfirmDialog(self._splitpane, "Clear AuthMatrix Configuration?", "Clear Config", JOptionPane.YES_NO_OPTION)
@@ -497,6 +498,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._tabs.removeAll()
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
+            self._chainTable.redrawTable()
 
     def runClick(self,e):
         t = Thread(target=self.runMessagesThread)
@@ -1280,23 +1282,24 @@ class MessageTableModel(AbstractTableModel):
         if self._db.lock.locked():
             return
         messageEntry = self._db.getMessageByRow(row)
-        if col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-2:
-            messageEntry._name = val
-        elif col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
-            messageEntry._regex = val
-        else:
-            roleIndex = self._db.getRoleByColumn(col, 'm')._index
-            messageEntry.addRoleByIndex(roleIndex,val)
-
-        # Update the checkbox result colors since there was a change
-        if col >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
-            messageEntry.clearResults()
-            self.fireTableCellUpdated(row,col)
-            for i in range(self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT, self.getColumnCount()):
-                self.fireTableCellUpdated(row,i)
-            # Backup option
-            # Update entire table since it affects color
-            # self.fireTableDataChanged()
+        if messageEntry:
+            if col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-2:
+                messageEntry._name = val
+            elif col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
+                messageEntry._regex = val
+            else:
+                roleIndex = self._db.getRoleByColumn(col, 'm')._index
+                messageEntry.addRoleByIndex(roleIndex,val)
+    
+            # Update the checkbox result colors since there was a change
+            if col >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
+                messageEntry.clearResults()
+                self.fireTableCellUpdated(row,col)
+                for i in range(self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT, self.getColumnCount()):
+                    self.fireTableCellUpdated(row,i)
+                # Backup option
+                # Update entire table since it affects color
+                # self.fireTableDataChanged()
 
     # Set checkboxes editable
     def isCellEditable(self, row, col):
@@ -1454,21 +1457,21 @@ class ChainTableModel(AbstractTableModel):
         if self._db.lock.locked():
             return
         chainEntry = self._db.getChainByRow(row)
-
-        if col == 0:
-            chainEntry._name = val
-        elif col == 1:
-            chainEntry._fromID = val
-        elif col == 2:
-            chainEntry._fromStart = val
-        elif col == 3:
-            chainEntry._fromEnd = val
-        elif col == 4:
-            chainEntry._toID = val
-        elif col == 5:
-            chainEntry._toStart = val
-        elif col == 6:
-            chainEntry._toEnd = val
+        if chainEntry:
+            if col == 0:
+                chainEntry._name = val
+            elif col == 1:
+                chainEntry._fromID = val
+            elif col == 2:
+                chainEntry._fromStart = val
+            elif col == 3:
+                chainEntry._fromEnd = val
+            elif col == 4:
+                chainEntry._toID = val
+            elif col == 5:
+                chainEntry._toStart = val
+            elif col == 6:
+                chainEntry._toEnd = val
 
 
 
