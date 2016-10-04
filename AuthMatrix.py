@@ -25,7 +25,8 @@ from burp import IContextMenuFactory
 from burp import IHttpRequestResponse
 
 from java.awt import Component;
-from java.awt import GridLayout;
+from java.awt import GridBagLayout;
+from java.awt import GridBagConstraints;
 from java.io import ObjectOutputStream;
 from java.io import FileOutputStream;
 from java.io import ObjectInputStream;
@@ -55,6 +56,9 @@ from javax.swing.table import JTableHeader;
 from java.awt import Color;
 from java.awt.event import MouseAdapter;
 from java.awt.event import ActionListener;
+from java.awt.event import ItemListener;
+from java.awt.event import ItemEvent;
+from javax.swing.event import DocumentListener;
 import java.lang;
 
 from org.python.core.util import StringUtil
@@ -204,7 +208,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     else:
                         messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
 
-                    ok, host, port, tls = selfExtender.changeDomainPopup()
+                    service = None if len(messages)>1 else messages[0]._requestResponse.getHttpService()
+
+                    ok, host, port, tls = selfExtender.changeDomainPopup(service)
                     if ok and host:
                         if not port:
                             port = 443 if tls else 80
@@ -448,32 +454,84 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         t.start()
 
 
-    def changeDomainPopup(self):
+    def changeDomainPopup(self, service):
         hostField = JTextField(25)
         portField = JTextField(25)
         checkbox = JCheckBox()
-        domainPanel = JPanel(GridLayout(0,1))
+        errorField = JLabel("\n")
+        errorField.setForeground(Color.orange);
+        errorField.setFont
+
+        def isValidDomain(domain):
+            return re.match(r'^[a-zA-Z0-9-\.]+$', domain)
+
+        if service:
+            hostField.setText(service.getHost())
+            portField.setText(str(service.getPort()))
+            if service.getProtocol()=="https":
+                checkbox.setSelected(True)
+
+        class HttpsItemListener(ItemListener):
+            def itemStateChanged(self, e):
+                if e.getStateChange() == ItemEvent.SELECTED and portField.getText() == "80":                    
+                    portField.setText("443")
+                elif e.getStateChange() == ItemEvent.DESELECTED and portField.getText() == "443":
+                    portField.setText("80")
+        checkbox.addItemListener(HttpsItemListener())
+
+        class HostDocumentListener(DocumentListener):
+            def changeUpdate(self, e):
+                self.testHost()
+            def removeUpdate(self, e):
+                self.testHost()
+            def insertUpdate(self, e):
+                self.testHost()
+
+            def testHost(self):
+                domain = hostField.getText()
+                matches = isValidDomain(domain)
+                if not matches:
+                    # NOTE Hacky way to fix layout when host is long
+                    if len(domain)>40:
+                        domain = domain[:40]+"..."
+                    errorField.setText("Invalid host: "+domain)
+                else:
+                    errorField.setText("\n")
+        hostField.getDocument().addDocumentListener(HostDocumentListener())
+
+        domainPanel = JPanel(GridBagLayout())
+        gbc = GridBagConstraints()
+        gbc.anchor = GridBagConstraints.WEST
 
         firstline = JPanel()
         firstline.add(JLabel("Specify the details of the server to which the request will be sent."))
-        domainPanel.add(firstline)
         secondline = JPanel()
         secondline.add(JLabel("Host: "))
         secondline.add(hostField)
-        domainPanel.add(secondline)
         thirdline = JPanel()
         thirdline.add(JLabel("Port: "))
         thirdline.add(portField)
-        domainPanel.add(thirdline)
         fourthline = JPanel()
         fourthline.add(checkbox)
         fourthline.add(JLabel("Use HTTPS"))
-        domainPanel.add(fourthline)
+        fifthline = JPanel()
+        fifthline.add(errorField)
+
+        gbc.gridy = 0
+        domainPanel.add(firstline,gbc)
+        gbc.gridy = 1
+        domainPanel.add(secondline, gbc)
+        gbc.gridy = 2
+        domainPanel.add(thirdline, gbc)
+        gbc.gridy = 3
+        domainPanel.add(fourthline, gbc)
+        gbc.gridy = 4
+        domainPanel.add(fifthline, gbc)
 
         result = JOptionPane.showConfirmDialog(
             self._splitpane,domainPanel, "Configure target details", JOptionPane.OK_CANCEL_OPTION)
         cancelled = (result == JOptionPane.CANCEL_OPTION)
-        if cancelled:
+        if cancelled or not isValidDomain(hostField.getText()):
             return (False, None, None, False)
         return (True, hostField.getText(), portField.getText(), checkbox.isSelected())
 
