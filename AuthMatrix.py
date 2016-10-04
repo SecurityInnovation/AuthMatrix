@@ -96,7 +96,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
         # Table of User entries
-        self._userTable = UserTable(self, model = UserTableModel(self._db))
+        self._userTable = UserTable(self, model = UserTableModel(self._db)) # TODO maybe remove self?
         roleScrollPane = JScrollPane(self._userTable)
         self._userTable.redrawTable()
 
@@ -109,6 +109,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._messageTable.setDragEnabled(True)
         self._messageTable.setDropMode(DropMode.INSERT_ROWS)
         self._messageTable.setTransferHandler(MessageTableRowTransferHandler(self._messageTable))                
+
+        # Table of Chain entries
+        self._chainTable = ChainTable(model = ChainTableModel(self._db))
+        chainScrollPane = JScrollPane(self._chainTable)
+        self._chainTable.redrawTable()
 
 
         # Semi-Generic Popup stuff
@@ -168,6 +173,18 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         selfExtender._db.deleteUser(i)
                     selfExtender._selectedColumn = -1
                     selfExtender._userTable.redrawTable()
+
+        class actionRemoveChain(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._chainTable.getSelectedRows():
+                        indexes = [selfExtender._db.getChainByRow(selfExtender._selectedRow)._index]
+                    else:
+                        indexes = [selfExtender._db.getChainByRow(rowNum)._index for rowNum in selfExtender._chainTable.getSelectedRows()]
+                    for i in indexes:
+                        selfExtender._db.deleteChain(i)
+                    selfExtender._selectedColumn = -1
+                    selfExtender._chainTable.redrawTable()
 
         class actionRemoveRole(ActionListener):
 
@@ -259,8 +276,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         roleRemoveFromUserTable.addActionListener(actionRemoveRole("u"))
         userHeaderPopup.add(roleRemoveFromUserTable)
 
-        # Top pane
-        topPane = JSplitPane(JSplitPane.VERTICAL_SPLIT,roleScrollPane,messageScrollPane)
+        # Chain Table popup
+        chainPopup = JPopupMenu()
+        addPopup(self._chainTable,chainPopup)
+        chainRemove = JMenuItem("Remove Chain(s)")
+        chainRemove.addActionListener(actionRemoveChain())
+        chainPopup.add(chainRemove)
+
 
         # request tabs added to this tab on click in message table
         self._tabs = JTabbedPane()
@@ -271,6 +293,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         newUserButton = JButton("New User", actionPerformed=self.getInputUserClick)
         newRoleButton = JButton("New Role", actionPerformed=self.getInputRoleClick)
         #debugButton = JButton("Debug", actionPerformed=self.printDB)
+        newChainButton = JButton("New Chain [ADVANCED]", actionPerformed=self.getInputChainClick)
         saveButton = JButton("Save", actionPerformed=self.saveClick)
         loadButton = JButton("Load", actionPerformed=self.loadClick)
         clearButton = JButton("Clear", actionPerformed=self.clearClick)
@@ -278,10 +301,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         buttons.add(newUserButton)
         buttons.add(newRoleButton)
         #buttons.add(debugButton)
+        buttons.add(newChainButton)
         buttons.add(saveButton)
         buttons.add(loadButton)
         buttons.add(clearButton)
 
+
+        # Top pane
+        firstPane = JSplitPane(JSplitPane.VERTICAL_SPLIT,roleScrollPane,messageScrollPane)
+        topPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, firstPane, chainScrollPane)
         bottomPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, self._tabs, buttons)
 
         # Main Pane
@@ -291,17 +319,21 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         # customize our UI components
         callbacks.customizeUiComponent(self._splitpane)
+        callbacks.customizeUiComponent(firstPane)
         callbacks.customizeUiComponent(topPane)
         callbacks.customizeUiComponent(bottomPane)
         callbacks.customizeUiComponent(messageScrollPane)
         callbacks.customizeUiComponent(roleScrollPane)
+        callbacks.customizeUiComponent(chainScrollPane)
         callbacks.customizeUiComponent(self._messageTable)
         callbacks.customizeUiComponent(self._userTable)
+        callbacks.customizeUiComponent(self._chainTable)
         callbacks.customizeUiComponent(self._tabs)
         callbacks.customizeUiComponent(buttons)
 
         self._splitpane.setResizeWeight(0.5)
-        topPane.setResizeWeight(0.3)
+        firstPane.setResizeWeight(0.35)
+        topPane.setResizeWeight(0.80)
         bottomPane.setResizeWeight(0.95)
 
 
@@ -398,6 +430,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
 
+    def getInputChainClick(self,e):
+        newChain = JOptionPane.showInputDialog(self._splitpane,"Enter name for new chain (ie CSRF):")
+        if not newChain is None:
+            self._db.createNewChain(newChain)
+            self._chainTable.redrawTable()
+
     def saveClick(self, e):
         # Update original requests with any user changes
         self._messageTable.updateMessages()
@@ -452,7 +490,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         t = Thread(target=self.runMessagesThread)
         self._tabs.removeAll()
         t.start()
-
 
     def changeDomainPopup(self, service):
         hostField = JTextField(25)
@@ -747,6 +784,7 @@ class MatrixDB():
         # NOTE: consider moving these constants to a different class
         self.STATIC_USER_TABLE_COLUMN_COUNT = 4
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
+        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
         self.LOAD_TIMEOUT = 3.0
         self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
         self.COOKIE_HEADER_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
@@ -756,9 +794,11 @@ class MatrixDB():
         self.arrayOfMessages = ArrayList()
         self.arrayOfRoles = ArrayList()
         self.arrayOfUsers = ArrayList()
+        self.arrayOfChains = ArrayList()
         self.deletedUserCount = 0
         self.deletedRoleCount = 0
         self.deletedMessageCount = 0
+        self.deletedChainCount = 0
 
     # Returns the index of the user, whether its new or not
     def getOrCreateUser(self, name):
@@ -822,14 +862,24 @@ class MatrixDB():
         self.lock.release()
         return messageIndex
 
+    def createNewChain(self):
+        self.lock.acquire()
+        chainIndex = self.arrayOfChains.size()
+        self.arrayOfChains.add(ChainEntry(chainIndex, chainIndex - self.deletedChainCount))
+
+        self.lock.release()
+        return chainIndex
+
     def clear(self):
         self.lock.acquire()
         self.arrayOfMessages = ArrayList()
         self.arrayOfRoles = ArrayList()
         self.arrayOfUsers = ArrayList()
+        self.arrayOfChains = ArrayList()
         self.deletedUserCount = 0
         self.deletedRoleCount = 0
         self.deletedMessageCount = 0
+        self.deletedArrayCount = 0
         self.lock.release()
 
     def load(self, db, extender):
@@ -837,9 +887,12 @@ class MatrixDB():
         self.arrayOfUsers = ArrayList()
         self.arrayOfRoles = ArrayList()
         self.arrayOfMessages = ArrayList()
+        self.arrayOfChains = ArrayList()
         self.deletedUserCount = db.deletedUserCount
         self.deletedRoleCount = db.deletedRoleCount
         self.deletedMessageCount = db.deletedMessageCount
+        self.deletedChainCount = 0 # TODO
+
 
         for message in db.arrayOfMessages:
             if message._successRegex.startswith(self.FAILURE_REGEX_SERIALIZE_CODE):
@@ -933,6 +986,9 @@ class MatrixDB():
     def getActiveMessageIndexes(self):
         return [x._index for x in self.arrayOfMessages if not x.isDeleted()]
 
+    def getActiveChainIndexes(self):
+        return [x._index for x in self.arrayOfChains if not x.isDeleted()]        
+
     def getActiveUserCount(self):
         return self.arrayOfUsers.size()-self.deletedUserCount
 
@@ -941,6 +997,9 @@ class MatrixDB():
 
     def getActiveMessageCount(self):
         return self.arrayOfMessages.size()-self.deletedMessageCount
+
+    def getActiveChainCount(self):
+        return self.arrayOfChains.size()-self.deletedChainCount    
 
     def getMessageByRow(self, row):
         for m in self.arrayOfMessages:
@@ -957,6 +1016,11 @@ class MatrixDB():
         for r in self.arrayOfRoles:
             if not r.isDeleted() and r.getColumn()+staticcount == column:
                 return r
+
+    def getChainByRow(self, row):
+        for c in self.arrayOfChains:
+            if not c.isDeleted() and c.getTableRow() == row:
+                return c
 
     def deleteUser(self,userIndex):
         self.lock.acquire()
@@ -1002,6 +1066,21 @@ class MatrixDB():
                     message.setTableRow(message.getTableRow()-1)
 
         self.lock.release()
+
+    def deleteChain(self,chainIndex):
+        self.lock.acquire()
+        chainEntry = self.arrayOfChains[chainIndex]
+        if chainEntry:
+            chainEntry.setDeleted()
+            self.deletedChainCount += 1
+
+            previousRow = chainEntry.getTableRow()
+            for i in self.getActiveChainIndexes():
+                chain = self.arrayOfChains[i]
+                if chain.getTableRow()>previousRow:
+                    chain.setTableRow(chain.getTableRow()-1)
+
+        self.lock.release()            
 
     def getMessagesInOrderByRow(self):
         messages = []
@@ -1301,6 +1380,119 @@ class MessageTable(JTable):
         self._viewerMap = {}
 
 
+
+
+###
+### Chain Tables
+###
+
+class ChainTableModel(AbstractTableModel):
+
+    def __init__(self, db):
+        self._db = db
+
+    def getRowCount(self):
+        return self._db.getActiveChainCount()
+        
+    def getColumnCount(self):
+        return self._db.STATIC_CHAIN_TABLE_COLUMN_COUNT
+
+    def getColumnName(self, columnIndex):
+        if columnIndex == 0:
+            return "Chain"
+        elif columnIndex == 1:
+            return "SRC - Message ID"
+        elif columnIndex == 2:
+            return "SRC - Start After Expression"
+        elif columnIndex == 3:
+            return "SRC - End at Delimiter"
+        elif columnIndex == 4:
+            return "DEST - Message ID"
+        elif columnIndex == 5:
+            return "DEST - Start After Expression"
+        elif columnIndex == 6:
+            return "DEST - End at Delimiter"
+        return ""
+
+    def getValueAt(self, rowIndex, columnIndex):
+        chainEntry = self._db.getChainByRow(rowIndex)
+        if chainEntry:
+            if columnIndex == 0:
+                return str(chainEntry._name)
+            elif columnIndex == 1:
+                return str(chainEntry._fromID)
+            elif columnIndex == 2:
+                return chainEntry._fromStart
+            elif columnIndex == 3:
+                return chainEntry._fromEnd
+            elif columnIndex == 4:
+                return str(chainEntry._toID)
+            elif columnIndex == 5:
+                return chainEntry._toStart
+            elif columnIndex == 6:
+                return chainEntry._toEnd
+                
+        return ""
+
+    def addRow(self, row):
+        self.fireTableRowsInserted(row,row)
+
+    def setValueAt(self, val, row, col):
+        # NOTE: testing if .locked is ok here since its a manual operation
+        if self._db.lock.locked():
+            return
+        chainEntry = self._db.getChainByRow(row)
+
+        if col == 0:
+            chainEntry._name = val
+        elif col == 1:
+            chainEntry._fromID = val
+        elif col == 2:
+            chainEntry._fromStart = val
+        elif col == 3:
+            chainEntry._fromEnd = val
+        elif col == 4:
+            chainEntry._toID = val
+        elif col == 5:
+            chainEntry._toStart = val
+        elif col == 6:
+            chainEntry._toEnd = val
+
+
+
+    def isCellEditable(self, row, col):
+        if col >= 0:
+            return True
+        return False
+
+    def getColumnClass(self, columnIndex):
+        return str
+        
+
+
+class ChainTable(JTable):
+
+    def __init__(self, model):
+        self.setModel(model)
+        return
+
+    def redrawTable(self):
+        # NOTE: this is prob ineffecient but it should catchall for changes to the table
+        self.getModel().fireTableStructureChanged()
+        self.getModel().fireTableDataChanged()
+        
+       # Resize
+        self.getColumnModel().getColumn(0).setMinWidth(60);
+        self.getColumnModel().getColumn(1).setMinWidth(135);
+        self.getColumnModel().getColumn(1).setMaxWidth(135);        
+        self.getColumnModel().getColumn(2).setMinWidth(180);
+        self.getColumnModel().getColumn(3).setMinWidth(150);
+        self.getColumnModel().getColumn(4).setMinWidth(135);
+        self.getColumnModel().getColumn(4).setMaxWidth(135);        
+        self.getColumnModel().getColumn(5).setMinWidth(180);
+        self.getColumnModel().getColumn(6).setMinWidth(150);
+
+
 # For color-coding checkboxes in the message table
 class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
@@ -1504,6 +1696,36 @@ class RoleEntry:
 
     def getColumn(self):
         return self._column
+
+class ChainEntry:
+
+    def __init__(self, index, tableRow, name, fromID="", fromStart="", fromEnd="", toID="", toStart="", toEnd="", deleted=False):
+        self._index = index
+        self._fromID = fromID
+        self._fromStart = fromStart
+        self._fromEnd = fromEnd
+        self._toID = toID
+        self._toStart = toStart
+        self._toEnd = toEnd
+        self._deleted = deleted
+        self._tableRow = tableRow
+        self._name = name
+        return
+
+    def setDeleted(self):
+        self._deleted = True
+
+    def isDeleted(self):
+        return self._deleted    
+
+    def setTableRow(self, row):
+        self._tableRow = row
+
+    def getTableRow(self):
+        return self._tableRow
+
+
+
 
 ##
 ## SERIALIZABLE CLASSES
