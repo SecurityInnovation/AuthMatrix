@@ -54,6 +54,7 @@ from javax.swing.table import AbstractTableModel;
 from javax.swing.table import TableCellRenderer;
 from javax.swing.table import JTableHeader;
 from java.awt import Color;
+from java.awt import Font;
 from java.awt.event import MouseAdapter;
 from java.awt.event import ActionListener;
 from java.awt.event import ItemListener;
@@ -293,7 +294,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         newUserButton = JButton("New User", actionPerformed=self.getInputUserClick)
         newRoleButton = JButton("New Role", actionPerformed=self.getInputRoleClick)
         #debugButton = JButton("Debug", actionPerformed=self.printDB)
-        newChainButton = JButton("New Chain [ADVANCED]", actionPerformed=self.getInputChainClick)
+        newChainButton = JButton("New Chain [Advanced]", actionPerformed=self.getInputChainClick)
         saveButton = JButton("Save", actionPerformed=self.saveClick)
         loadButton = JButton("Load", actionPerformed=self.loadClick)
         clearButton = JButton("Clear", actionPerformed=self.clearClick)
@@ -307,9 +308,18 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         buttons.add(clearButton)
 
 
+        advancedLabel = JLabel("Advanced Configuration")
+        #advancedLabel.setForeground(Color.black);
+        #advancedLabel.setBackground(Color.lightGray);
+        #advancedLabel.setOpaque(True)
+        font = advancedLabel.getFont()
+        font = Font(font.getFontName(), Font.BOLD, font.getSize())
+        advancedLabel.setFont(font)
+
         # Top pane
         firstPane = JSplitPane(JSplitPane.VERTICAL_SPLIT,roleScrollPane,messageScrollPane)
-        topPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, firstPane, chainScrollPane)
+        secondPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, advancedLabel,chainScrollPane)
+        topPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, firstPane, secondPane)
         bottomPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, self._tabs, buttons)
 
         # Main Pane
@@ -320,6 +330,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # customize our UI components
         callbacks.customizeUiComponent(self._splitpane)
         callbacks.customizeUiComponent(firstPane)
+        callbacks.customizeUiComponent(secondPane)
         callbacks.customizeUiComponent(topPane)
         callbacks.customizeUiComponent(bottomPane)
         callbacks.customizeUiComponent(messageScrollPane)
@@ -329,6 +340,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         callbacks.customizeUiComponent(self._userTable)
         callbacks.customizeUiComponent(self._chainTable)
         callbacks.customizeUiComponent(self._tabs)
+        callbacks.customizeUiComponent(advancedLabel)
         callbacks.customizeUiComponent(buttons)
 
         self._splitpane.setResizeWeight(0.5)
@@ -1418,15 +1430,15 @@ class ChainTableModel(AbstractTableModel):
         chainEntry = self._db.getChainByRow(rowIndex)
         if chainEntry:
             if columnIndex == 0:
-                return str(chainEntry._name)
+                return chainEntry._name
             elif columnIndex == 1:
-                return str(chainEntry._fromID)
+                return chainEntry._fromID
             elif columnIndex == 2:
                 return chainEntry._fromStart
             elif columnIndex == 3:
                 return chainEntry._fromEnd
             elif columnIndex == 4:
-                return str(chainEntry._toID)
+                return chainEntry._toID
             elif columnIndex == 5:
                 return chainEntry._toStart
             elif columnIndex == 6:
