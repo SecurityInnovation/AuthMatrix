@@ -308,7 +308,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         buttons.add(clearButton)
 
 
-        advancedLabel = JLabel("Advanced Configuration")
+        advancedLabel = JLabel("Advanced Configuration - Chains")
         #advancedLabel.setForeground(Color.black);
         #advancedLabel.setBackground(Color.lightGray);
         #advancedLabel.setOpaque(True)
@@ -718,7 +718,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             message = self._helpers.buildHttpMessage(newHeaders, newBody)
 
             # Replace with Chain
-            for toStart, toEnd, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
+            for toRegex, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
                 print "REPLACE"
                 print toValue
                 message = StringUtil.fromBytes(message)
@@ -751,8 +751,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     response = StringUtil.fromBytes(response)
                     for c in self._db.getActiveChainIndexes():
                         chain = self._db.arrayOfChains[c]
-                        if chain._fromID == str(messageIndex):
+                        if chain._fromID == str(messageIndex) and chain._enabled:
                             print "SOURCE"
+                            """
                             start = response.find(chain.getFromStart())
                             afterstart = start + len(chain.getFromStart())
                             end = response[afterstart:].find(chain.getFromEnd())+afterstart
@@ -763,8 +764,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             print str(end)
                             if start>=0 and end>afterstart:
                                 # TODO maybe handle multiple tos
-                                userEntry.addChainResultByMessageIndex(chain._toID, chain.getToStart(), chain.getToEnd(), response[afterstart:end])
-
+                                userEntry.addChainResultByMessageIndex(chain._toID, chain.getToRegex(), response[afterstart:end])
+                            """
             index +=1
 
         # Grab all active roleIndexes that are checkboxed
@@ -837,7 +838,7 @@ class MatrixDB():
         # NOTE: consider moving these constants to a different class
         self.STATIC_USER_TABLE_COLUMN_COUNT = 4
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
-        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
+        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 6
         self.LOAD_TIMEOUT = 3.0
         self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
         self.COOKIE_HEADER_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
@@ -944,7 +945,7 @@ class MatrixDB():
         self.deletedUserCount = db.deletedUserCount
         self.deletedRoleCount = db.deletedRoleCount
         self.deletedMessageCount = db.deletedMessageCount
-        self.deletedChainCount = 0 # TODO
+        self.deletedChainCount = 0 # Updated with chain entries below in arrayofUsers
 
 
         for message in db.arrayOfMessages:
@@ -969,20 +970,47 @@ class MatrixDB():
                 role._deleted))
         
         for user in db.arrayOfUsers:
-            token = [""] if not user._token else user._token.split(self.COOKIE_HEADER_SERIALIZE_CODE)
-            cookies = token[0]
-            header = "" if len(token)==1 else token[1]
-            name = "" if not user._name else user._name
-            postarg = "" if not user._staticcsrf else user._staticcsrf
-            self.arrayOfUsers.add(UserEntry(
-                int(user._index),
-                int(user._tableRow),
-                name,
-                user._roles,
-                user._deleted,
-                cookies,
-                header,
-                postarg))
+            # NOTE to preserve backwords compatability, chains are stored here in a really hacky way
+            if type(user._roles) == int:
+                # Chain
+                self.deletedChainCount = user._roles
+                
+                name = "" if not user._name else user._name
+                token = user._token.split(self.COOKIE_HEADER_SERIALIZE_CODE)
+                assert(len(token)==2)
+                fromID = token[0]
+                fromRegex = token[1]
+                staticcsrf = user._staticcsrf.split(self.COOKIE_HEADER_SERIALIZE_CODE)
+                assert(len(staticcsrf)==2)
+                toID = staticcsrf[0]
+                toRegex = staticcsrf[1]
+                self.arrayOfChains.add(ChainEntry(
+                    int(user._index),
+                    int(user._tableRow),
+                    name,
+                    fromID,
+                    fromRegex,
+                    toID,
+                    toRegex,
+                    user._deleted
+                    ))
+
+            else: 
+                # Normal User
+                token = [""] if not user._token else user._token.split(self.COOKIE_HEADER_SERIALIZE_CODE)
+                cookies = token[0]
+                header = "" if len(token)==1 else token[1]
+                name = "" if not user._name else user._name
+                postarg = "" if not user._staticcsrf else user._staticcsrf
+                self.arrayOfUsers.add(UserEntry(
+                    int(user._index),
+                    int(user._tableRow),
+                    name,
+                    user._roles,
+                    user._deleted,
+                    cookies,
+                    header,
+                    postarg))
 
         self.lock.release()
 
@@ -1025,6 +1053,18 @@ class MatrixDB():
                 user._deleted,
                 token,
                 postargs))
+        # NOTE to preserve backwords compatability, chains are stored in UserEntries in a really hacky way
+        for chain in self.arrayOfChains:
+            name = chain._name if chain._name else ""
+            serializedUsers.append(UserEntryData(
+                chain._index,
+                chain._tableRow,
+                name,
+                self.deletedChainCount,
+                chain._deleted,
+                chain._fromID+self.COOKIE_HEADER_SERIALIZE_CODE+chain._fromRegex,
+                chain._toID+self.COOKIE_HEADER_SERIALIZE_CODE+chain._toRegex
+                ))
 
         ret = MatrixDBData(serializedMessages,serializedRoles, serializedUsers, self.deletedUserCount, self.deletedRoleCount, self.deletedMessageCount)
         self.lock.release()
@@ -1456,38 +1496,34 @@ class ChainTableModel(AbstractTableModel):
 
     def getColumnName(self, columnIndex):
         if columnIndex == 0:
-            return "Chain"
+            return "Enabled"
         elif columnIndex == 1:
-            return "SRC - Message ID"
+            return "Chain"
         elif columnIndex == 2:
-            return "SRC - Start After Expression"
+            return "SRC - Message ID"
         elif columnIndex == 3:
-            return "SRC - End at Delimiter"
+            return "SRC - Regex"
         elif columnIndex == 4:
             return "DEST - Message ID"
         elif columnIndex == 5:
-            return "DEST - Start After Expression"
-        elif columnIndex == 6:
-            return "DEST - End at Delimiter"
+            return "DEST - Regex"
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
         chainEntry = self._db.getChainByRow(rowIndex)
         if chainEntry:
             if columnIndex == 0:
-                return chainEntry._name
+                return chainEntry._enabled
             elif columnIndex == 1:
-                return chainEntry._fromID
+                return chainEntry._name
             elif columnIndex == 2:
-                return chainEntry._fromStart
+                return chainEntry._fromID
             elif columnIndex == 3:
-                return chainEntry._fromEnd
+                return chainEntry._fromRegex
             elif columnIndex == 4:
                 return chainEntry._toID
             elif columnIndex == 5:
-                return chainEntry._toStart
-            elif columnIndex == 6:
-                return chainEntry._toEnd
+                return chainEntry._toRegex
                 
         return ""
 
@@ -1501,19 +1537,17 @@ class ChainTableModel(AbstractTableModel):
         chainEntry = self._db.getChainByRow(row)
         if chainEntry:
             if col == 0:
-                chainEntry._name = val
+                chainEntry._enabled = val
             elif col == 1:
-                chainEntry._fromID = val
+                chainEntry._name = val
             elif col == 2:
-                chainEntry._fromStart = val
+                chainEntry._fromID = val
             elif col == 3:
-                chainEntry._fromEnd = val
+                chainEntry._fromRegex = val
             elif col == 4:
                 chainEntry._toID = val
             elif col == 5:
-                chainEntry._toStart = val
-            elif col == 6:
-                chainEntry._toEnd = val
+                chainEntry._toRegex = val
 
 
 
@@ -1523,6 +1557,8 @@ class ChainTableModel(AbstractTableModel):
         return False
 
     def getColumnClass(self, columnIndex):
+        if columnIndex == 0:
+            return Boolean
         return str
         
 
@@ -1540,14 +1576,14 @@ class ChainTable(JTable):
         
        # Resize
         self.getColumnModel().getColumn(0).setMinWidth(60);
-        self.getColumnModel().getColumn(1).setMinWidth(135);
-        self.getColumnModel().getColumn(1).setMaxWidth(135);        
-        self.getColumnModel().getColumn(2).setMinWidth(180);
-        self.getColumnModel().getColumn(3).setMinWidth(150);
+        self.getColumnModel().getColumn(0).setMaxWidth(60);
+        self.getColumnModel().getColumn(1).setMinWidth(60);
+        self.getColumnModel().getColumn(2).setMinWidth(135);
+        self.getColumnModel().getColumn(2).setMaxWidth(135);        
+        self.getColumnModel().getColumn(3).setMinWidth(180);
         self.getColumnModel().getColumn(4).setMinWidth(135);
         self.getColumnModel().getColumn(4).setMaxWidth(135);        
         self.getColumnModel().getColumn(5).setMinWidth(180);
-        self.getColumnModel().getColumn(6).setMinWidth(150);
 
 
 # For color-coding checkboxes in the message table
@@ -1721,11 +1757,11 @@ class UserEntry:
     def addRoleByIndex(self, roleIndex, enabled=False):
         self._roles[roleIndex] = enabled
 
-    def addChainResultByMessageIndex(self, toID, toStart, toEnd, toValue):
+    def addChainResultByMessageIndex(self, toID, toRegex, toValue):
         if not toID in self._chainResults:
-            self._chainResults[toID] = [(toStart, toEnd, toValue)]
+            self._chainResults[toID] = [(toRegex, toValue)]
         else:
-            self._chainResults[toID].append((toStart, toEnd, toValue))
+            self._chainResults[toID].append((toRegex, toValue))
 
     def getChainResultByMessageIndex(self, toID):
         if str(toID) in self._chainResults:
@@ -1771,17 +1807,20 @@ class RoleEntry:
 
 class ChainEntry:
 
-    def __init__(self, index, tableRow, name, fromID="", fromStart="", fromEnd="", toID="", toStart="", toEnd="", deleted=False):
+    def __init__(self, index, tableRow, name, fromID="", fromRegex="", toID="", toRegex="", deleted=False, enabled=False):
         self._index = index
         self._fromID = fromID
-        self._fromStart = fromStart
-        self._fromEnd = fromEnd
+        self._fromRegex = fromRegex
         self._toID = toID
-        self._toStart = toStart
-        self._toEnd = toEnd
+        self._toRegex = toRegex
         self._deleted = deleted
         self._tableRow = tableRow
         self._name = name
+        self._enabled = enabled
+        self._fromStart = ""
+        self._fromEnd = ""
+        self._toStart = ""
+        self._toEnd = ""
         return
 
     def setDeleted(self):
@@ -1796,8 +1835,6 @@ class ChainEntry:
     def getTableRow(self):
         return self._tableRow
 
-    # TODO make these handle \r\n correctly
-    # TODO consider replacing with regex grouping
     def getFromStart(self):
         return self._fromStart
 
@@ -1810,6 +1847,29 @@ class ChainEntry:
     def getToEnd(self):
         return self._toEnd
 
+    def setFromStart(self, fromStart):
+        self._fromStart = fromStart
+        if self._fromEnd:
+            self._fromRegex = self.getRexeg(self._fromStart,self._fromEnd)
+
+    def setFromEnd(self, fromEnd):
+        self._fromEnd = fromEnd
+        if self._fromStart:
+            self._fromRegex = self.getRexeg(self._fromStart,self._fromEnd)
+
+    def setToStart(self, toStart):
+        self._toStart = toStart
+        if self._toEnd:
+            self._toRegex = self.getRexeg(self._toStart,self._toEnd)
+
+    def setToEnd(self, toEnd):
+        self._toEnd = toEnd
+        if self._toStart:
+            self._toRegex = self.getRexeg(self._toStart,self._toEnd)
+
+    def getRexeg(self,start,end):
+        # TODO encode special chars
+        return start+"(.*?)"+end
 
 
 ##
