@@ -235,7 +235,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         for m in messages:
                             # TODO is replacing the host header appropriate here?
                             request = self.replaceDomain(m._requestResponse.getRequest(), m._requestResponse.getHttpService().getHost(), host)
-                            m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request)
+                            m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request) # TODO fails on non int port
                             m.clearResults()
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
@@ -595,6 +595,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         try:
             # Update original requests with any user changes
             self._messageTable.updateMessages()
+            self._db.clearAllChainResults()
 
             indexes = messageIndexes
             if not indexes:
@@ -716,6 +717,21 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             # Construct and send a message with the new headers
             message = self._helpers.buildHttpMessage(newHeaders, newBody)
 
+            # Replace with Chain
+            for toStart, toEnd, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
+                print "REPLACE"
+                print toValue
+                message = StringUtil.fromBytes(message)
+                start = message.find(toStart)
+                afterstart = start+len(toStart)
+                end = message[afterstart:].find(toEnd)+afterstart
+                print toStart
+                print str(start)
+                print str(end)
+                if start>=0 and end>afterstart:
+                    message = message[0:afterstart]+toValue+message[end:]
+                message = StringUtil.toBytes(message)
+
             # Run with threading to timeout correctly   
             tempRequestResponse.append(None)         
             t = Thread(target=loadRequestResponse, args = [index,messageInfo.getHttpService(),message])
@@ -726,6 +742,29 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             requestResponse = tempRequestResponse[index]
             if requestResponse:
                 messageEntry.addRunByUserIndex(userIndex, self._callbacks.saveBuffersToTempFiles(requestResponse))
+
+                # Get Chain Result
+                response = requestResponse.getResponse()
+                if not response:
+                    print "ERROR: No HTTP Response (Likely Invalid Target Host)"
+                else:
+                    response = StringUtil.fromBytes(response)
+                    for c in self._db.getActiveChainIndexes():
+                        chain = self._db.arrayOfChains[c]
+                        if chain._fromID == str(messageIndex):
+                            print "SOURCE"
+                            start = response.find(chain.getFromStart())
+                            afterstart = start + len(chain.getFromStart())
+                            end = response[afterstart:].find(chain.getFromEnd())+afterstart
+                            #print response
+                            #print chain.getFromStart()
+                            #print chain.getFromEnd()
+                            print str(start)
+                            print str(end)
+                            if start>=0 and end>afterstart:
+                                # TODO maybe handle multiple tos
+                                userEntry.addChainResultByMessageIndex(chain._toID, chain.getToStart(), chain.getToEnd(), response[afterstart:end])
+
             index +=1
 
         # Grab all active roleIndexes that are checkboxed
@@ -1117,6 +1156,9 @@ class MatrixDB():
 
         self.lock.release()
 
+    def clearAllChainResults(self):
+        for i in self.getActiveUserIndexes():
+            self.arrayOfUsers[i].clearChainResults()
 
 ##
 ## Tables and Table Models  
@@ -1672,11 +1714,26 @@ class UserEntry:
         self._cookies = cookies
         self._header = header
         self._postargs = postargs
+        self._chainResults = {}
         return
 
     # Roles are the index of the db role array and a bool for whether the checkbox is default enabled or not
     def addRoleByIndex(self, roleIndex, enabled=False):
         self._roles[roleIndex] = enabled
+
+    def addChainResultByMessageIndex(self, toID, toStart, toEnd, toValue):
+        if not toID in self._chainResults:
+            self._chainResults[toID] = [(toStart, toEnd, toValue)]
+        else:
+            self._chainResults[toID].append((toStart, toEnd, toValue))
+
+    def getChainResultByMessageIndex(self, toID):
+        if str(toID) in self._chainResults:
+            return self._chainResults[str(toID)]
+        return []
+
+    def clearChainResults(self):
+        self._chainResults = {}
 
     def setDeleted(self):
         self._deleted = True
@@ -1739,6 +1796,19 @@ class ChainEntry:
     def getTableRow(self):
         return self._tableRow
 
+    # TODO make these handle \r\n correctly
+    # TODO consider replacing with regex grouping
+    def getFromStart(self):
+        return self._fromStart
+
+    def getFromEnd(self):
+        return self._fromEnd
+
+    def getToStart(self):
+        return self._toStart
+
+    def getToEnd(self):
+        return self._toEnd
 
 
 
