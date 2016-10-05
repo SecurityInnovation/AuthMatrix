@@ -235,7 +235,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         for m in messages:
                             # TODO is replacing the host header appropriate here?
                             request = self.replaceDomain(m._requestResponse.getRequest(), m._requestResponse.getHttpService().getHost(), host)
-                            m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request) # TODO fails on non int port
+                            m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request) # TODOv06 fails on non int port
                             m.clearResults()
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
@@ -719,17 +719,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
             # Replace with Chain
             for toRegex, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
-                print "REPLACE"
-                print toValue
                 message = StringUtil.fromBytes(message)
-                start = message.find(toStart)
-                afterstart = start+len(toStart)
-                end = message[afterstart:].find(toEnd)+afterstart
-                print toStart
-                print str(start)
-                print str(end)
-                if start>=0 and end>afterstart:
-                    message = message[0:afterstart]+toValue+message[end:]
+                match = re.search(toRegex, message, re.DOTALL)
+                if match and len(match.groups()):
+                    message = message[0:match.start(1)]+toValue+message[match.end(1):]
                 message = StringUtil.toBytes(message)
 
             # Run with threading to timeout correctly   
@@ -752,20 +745,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     for c in self._db.getActiveChainIndexes():
                         chain = self._db.arrayOfChains[c]
                         if chain._fromID == str(messageIndex) and chain._enabled:
-                            print "SOURCE"
-                            """
-                            start = response.find(chain.getFromStart())
-                            afterstart = start + len(chain.getFromStart())
-                            end = response[afterstart:].find(chain.getFromEnd())+afterstart
-                            #print response
-                            #print chain.getFromStart()
-                            #print chain.getFromEnd()
-                            print str(start)
-                            print str(end)
-                            if start>=0 and end>afterstart:
+                            match = re.search(chain._fromRegex, response, re.DOTALL)
+                            if match and len(match.groups()):
+                                result = match.group(1)
                                 # TODO maybe handle multiple tos
-                                userEntry.addChainResultByMessageIndex(chain._toID, chain.getToRegex(), response[afterstart:end])
-                            """
+                                userEntry.addChainResultByMessageIndex(chain._toID, chain._toRegex, result)
             index +=1
 
         # Grab all active roleIndexes that are checkboxed
@@ -1056,14 +1040,18 @@ class MatrixDB():
         # NOTE to preserve backwords compatability, chains are stored in UserEntries in a really hacky way
         for chain in self.arrayOfChains:
             name = chain._name if chain._name else ""
+            fromID = chain._fromID if chain._fromID else ""
+            fromRegex = chain._fromRegex if chain._fromRegex else ""
+            toID = chain._toID if chain._toID else ""
+            toRegex = chain._toRegex if chain._toRegex else ""
             serializedUsers.append(UserEntryData(
                 chain._index,
                 chain._tableRow,
                 name,
                 self.deletedChainCount,
                 chain._deleted,
-                chain._fromID+self.COOKIE_HEADER_SERIALIZE_CODE+chain._fromRegex,
-                chain._toID+self.COOKIE_HEADER_SERIALIZE_CODE+chain._toRegex
+                fromID+self.COOKIE_HEADER_SERIALIZE_CODE+fromRegex,
+                toID+self.COOKIE_HEADER_SERIALIZE_CODE+toRegex
                 ))
 
         ret = MatrixDBData(serializedMessages,serializedRoles, serializedUsers, self.deletedUserCount, self.deletedRoleCount, self.deletedMessageCount)
