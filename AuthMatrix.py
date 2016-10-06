@@ -97,7 +97,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
         # Table of User entries
-        self._userTable = UserTable(self, model = UserTableModel(self._db)) # TODO maybe remove self?
+        self._userTable = UserTable(UserTableModel(self._db))
         roleScrollPane = JScrollPane(self._userTable)
         self._userTable.redrawTable()
 
@@ -877,7 +877,7 @@ class MatrixDB():
     def createNewMessage(self,messagebuffer,url):
         self.lock.acquire()
         messageIndex = self.arrayOfMessages.size()
-        self.arrayOfMessages.add(MessageEntry(messageIndex, messageIndex - self.deletedMessageCount, messagebuffer, url))
+        self.arrayOfMessages.add(MessageEntry(messageIndex, messageIndex - self.deletedMessageCount, messagebuffer, url.getPath()))
 
         # Add all existing roles as unchecked
         for roleIndex in self.getActiveRoleIndexes():
@@ -941,7 +941,7 @@ class MatrixDB():
                 message._index,
                 message._tableRow,
                 messageEntry,
-                message._url, message._name, message._roles, regex, message._deleted, failureRegexMode))
+                message._name, message._roles, regex, message._deleted, failureRegexMode))
 
         for role in db.arrayOfRoles:
             self.arrayOfRoles.add(RoleEntry(
@@ -1011,7 +1011,7 @@ class MatrixDB():
                 message._requestResponse.getHttpService().getHost(),
                 message._requestResponse.getHttpService().getPort(),
                 message._requestResponse.getHttpService().getProtocol(),
-                message._url, message._name, message._roles, regex, message._deleted))
+                message._name, message._roles, regex, message._deleted))
         for role in self.arrayOfRoles:
             serializedRoles.append(RoleEntryData(
                 role._index,
@@ -1270,8 +1270,7 @@ class UserTableModel(AbstractTableModel):
 
 class UserTable(JTable):
 
-    def __init__(self, extender, model):
-        self._extender = extender
+    def __init__(self, model):
         self.setModel(model)
         return
 
@@ -1686,12 +1685,11 @@ class RegexRenderer(JLabel, TableCellRenderer):
 
 class MessageEntry:
 
-    def __init__(self, index, tableRow, requestResponse, url, name = "", roles = {}, regex = "^HTTP/1\\.1 200 OK", deleted = False, failureRegexMode = False):
+    def __init__(self, index, tableRow, requestResponse, name = "", roles = {}, regex = "^HTTP/1\\.1 200 OK", deleted = False, failureRegexMode = False):
         self._index = index
         self._tableRow = tableRow
         self._requestResponse = requestResponse
-        self._url = url
-        self._name = url.getPath() if not name else name
+        self._name = name
         self._roles = roles.copy()
         self._failureRegexMode = failureRegexMode
         self._regex = regex
@@ -1903,14 +1901,14 @@ class MatrixDBData():
 # Used since the Burp RequestResponse object can not be serialized
 class MessageEntryData:
 
-    def __init__(self, index, tableRow, requestData, host, port, protocol, url, name, roles, successRegex, deleted):
+    def __init__(self, index, tableRow, requestData, host, port, protocol, name, roles, successRegex, deleted):
         self._index = index
         self._tableRow = tableRow
         self._requestData = requestData
         self._host = host
         self._port = port
         self._protocol = protocol
-        self._url = url
+        self._url = "" # NOTE obsolete, kept for backwords compatability
         self._name = name
         self._roles = roles
         # NOTE: to preserve backwords compatability, successregex will have a specific prefix "|AMFAILURE|" to indicate FailureRegexMode
