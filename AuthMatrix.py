@@ -732,12 +732,22 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     for c in self._db.getActiveChainIndexes():
                         chain = self._db.arrayOfChains[c]
                         if chain._fromID == str(messageIndex) and chain._enabled:
-                            # TODO, if set to singleUserSource, replace into all users
-                            match = re.search(chain._fromRegex, response, re.DOTALL)
-                            if match and len(match.groups()):
-                                result = match.group(1)
-                                for toID in chain.getToIDRange():
-                                    userEntry.addChainResultByMessageIndex(toID, chain._toRegex, result)
+                            # If a sourceUser is set, replace for all users' chain results
+                            # Else, replace each user's chain results individually
+                            replace = True
+                            affectedUsers = [userEntry]
+                            if chain._sourceUser:
+                                if str(chain._sourceUser) == str(userIndex):
+                                    affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
+                                else:
+                                    replace = False
+                            if replace:
+                                match = re.search(chain._fromRegex, response, re.DOTALL)
+                                if match and len(match.groups()):
+                                    result = match.group(1)
+                                    for toID in chain.getToIDRange():
+                                        for affectedUser in affectedUsers:
+                                            affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
             index +=1
 
         # Grab all active roleIndexes that are checkboxed
@@ -810,7 +820,7 @@ class MatrixDB():
         # NOTE: consider moving these constants to a different class
         self.STATIC_USER_TABLE_COLUMN_COUNT = 5
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
-        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 6
+        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
         self.LOAD_TIMEOUT = 3.0
         self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
         self.COOKIE_HEADER_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
@@ -1517,10 +1527,12 @@ class ChainTableModel(AbstractTableModel):
         elif columnIndex == 2:
             return "SRC - Message ID"
         elif columnIndex == 3:
-            return "Regex - Extract from HTTP Response"
+            return "SRC - User ID (Pitchfork Mode)" # TODO Rename
         elif columnIndex == 4:
-            return "DEST - Message ID(s)"
+            return "Regex - Extract from HTTP Response"
         elif columnIndex == 5:
+            return "DEST - Message ID(s)"
+        elif columnIndex == 6:
             return "Regex - Replace into HTTP Request"
         return ""
 
@@ -1537,12 +1549,13 @@ class ChainTableModel(AbstractTableModel):
             elif columnIndex == 2:
                 return chainEntry._fromID
             elif columnIndex == 3:
-                return chainEntry._fromRegex
+                return chainEntry._sourceUser
             elif columnIndex == 4:
-                return chainEntry._toID
+                return chainEntry._fromRegex
             elif columnIndex == 5:
+                return chainEntry._toID
+            elif columnIndex == 6:
                 return chainEntry._toRegex
-                
         return ""
 
     def addRow(self, row):
@@ -1561,12 +1574,13 @@ class ChainTableModel(AbstractTableModel):
             elif col == 2:
                 chainEntry._fromID = val
             elif col == 3:
-                chainEntry._fromRegex = val
+                chainEntry._sourceUser = val
             elif col == 4:
-                chainEntry._toID = val
+                chainEntry._fromRegex = val
             elif col == 5:
+                chainEntry._toID = val
+            elif col == 6:
                 chainEntry._toRegex = val
-
 
 
     def isCellEditable(self, row, col):
@@ -1601,10 +1615,12 @@ class ChainTable(JTable):
             self.getColumnModel().getColumn(1).setMaxWidth(240);
             self.getColumnModel().getColumn(2).setMinWidth(150);
             self.getColumnModel().getColumn(2).setMaxWidth(150);        
-            self.getColumnModel().getColumn(3).setMinWidth(180);
-            self.getColumnModel().getColumn(4).setMinWidth(150);
-            self.getColumnModel().getColumn(4).setMaxWidth(150);        
-            self.getColumnModel().getColumn(5).setMinWidth(180);
+            self.getColumnModel().getColumn(3).setMinWidth(210);
+            self.getColumnModel().getColumn(3).setMaxWidth(210);        
+            self.getColumnModel().getColumn(4).setMinWidth(180);
+            self.getColumnModel().getColumn(5).setMinWidth(150);
+            self.getColumnModel().getColumn(5).setMaxWidth(150);        
+            self.getColumnModel().getColumn(6).setMinWidth(180);
 
 
 # For color-coding checkboxes in the message table
@@ -1827,7 +1843,7 @@ class RoleEntry:
 
 class ChainEntry:
 
-    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, enabled=False):
+    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser="", enabled=False):
         self._index = index
         self._fromID = fromID
         self._fromRegex = fromRegex
@@ -1836,6 +1852,7 @@ class ChainEntry:
         self._deleted = deleted
         self._tableRow = tableRow
         self._name = name
+        self._sourceUser = sourceUser
         self._enabled = enabled
         self._fromStart = ""
         self._fromEnd = ""
