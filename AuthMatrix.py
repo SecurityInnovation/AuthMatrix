@@ -1746,7 +1746,7 @@ class UserEntry:
     def __init__(self, index, tableRow, name, roles = {}, deleted=False, cookies="", header="", postargs=""):
         self._index = index
         self._name = name
-        self._roles = roles
+        self._roles = roles.copy()
         self._deleted = deleted
         self._tableRow = tableRow
         self._cookies = cookies
