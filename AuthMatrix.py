@@ -230,12 +230,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
                     ok, host, port, tls = selfExtender.changeDomainPopup(service)
                     if ok and host:
-                        if not port:
+                        if not port or not port.isdigit():
                             port = 443 if tls else 80
                         for m in messages:
                             # TODO is replacing the host header appropriate here?
                             request = self.replaceDomain(m._requestResponse.getRequest(), m._requestResponse.getHttpService().getHost(), host)
-                            m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request) # TODOv06 fails on non int port
+                            m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request)
                             m.clearResults()
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
@@ -333,7 +333,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         self._splitpane.setResizeWeight(0.5)
         firstPane.setResizeWeight(0.35)
-        self._topPane.setResizeWeight(0.8)
+        self._topPane.setResizeWeight(0.85)
         bottomPane.setResizeWeight(0.95)
 
         # Handles checkbox color coding
@@ -734,8 +734,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             match = re.search(chain._fromRegex, response, re.DOTALL)
                             if match and len(match.groups()):
                                 result = match.group(1)
-                                # TODO maybe handle multiple tos
-                                userEntry.addChainResultByMessageIndex(chain._toID, chain._toRegex, result)
+                                for toID in chain.getToIDRange():
+                                    userEntry.addChainResultByMessageIndex(toID, chain._toRegex, result)
             index +=1
 
         # Grab all active roleIndexes that are checkboxed
@@ -1494,7 +1494,7 @@ class ChainTableModel(AbstractTableModel):
         elif columnIndex == 3:
             return "Regex - Extract from Source HTTP Response"
         elif columnIndex == 4:
-            return "DEST - Message ID"
+            return "DEST - Message ID(s)"
         elif columnIndex == 5:
             return "Regex - Replace into Destination HTTP Request"
         return ""
@@ -1759,8 +1759,8 @@ class UserEntry:
             self._chainResults[toID].append((toRegex, toValue))
 
     def getChainResultByMessageIndex(self, toID):
-        if str(toID) in self._chainResults:
-            return self._chainResults[str(toID)]
+        if toID in self._chainResults:
+            return self._chainResults[toID]
         return []
 
     def clearChainResults(self):
@@ -1862,9 +1862,24 @@ class ChainEntry:
         if self._toStart:
             self._toRegex = self.getRexeg(self._toStart,self._toEnd)
 
-    def getRexeg(self,start,end):
+    def getRexegFromStartAndEnd(self,start,end):
         # TODO encode special chars
         return start+"(.*?)"+end
+
+    def getToIDRange(self):
+        result = []
+        for part in self._toID.split(','):
+            if '-' in part:
+                a,b = part.split('-')
+                if a.isdigit() and b.isdigit():
+                    a,b = int(a),int(b)
+                    result.extend(range(a,b+1))
+            else:
+                if part.isdigit():
+                    a = int(part)
+                    result.append(a)
+        print result
+        return result
 
 
 ##
