@@ -294,7 +294,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         newUserButton = JButton("New User", actionPerformed=self.getInputUserClick)
         newRoleButton = JButton("New Role", actionPerformed=self.getInputRoleClick)
         #debugButton = JButton("Debug", actionPerformed=self.printDB)
-        newChainButton = JButton("New Chain [Advanced]", actionPerformed=self.getInputChainClick)
+        newChainButton = JButton("New Chain [Advanced]", actionPerformed=self.newChainClick)
         saveButton = JButton("Save", actionPerformed=self.saveClick)
         loadButton = JButton("Load", actionPerformed=self.loadClick)
         clearButton = JButton("Clear", actionPerformed=self.clearClick)
@@ -364,6 +364,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     ##
     ## implement ITab
     ##
+
     
     def getTabCaption(self):
         return "AuthMatrix"
@@ -442,11 +443,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
 
-    def getInputChainClick(self,e):
-        newChain = JOptionPane.showInputDialog(self._splitpane,"Enter name for new chain (ie CSRF):")
-        if not newChain is None:
-            self._db.createNewChain(newChain)
-            self._chainTable.redrawTable()
+    def newChainClick(self,e):
+        self._db.createNewChain()
+        self._chainTable.redrawTable()
 
     def saveClick(self, e):
         # Update original requests with any user changes
@@ -900,10 +899,21 @@ class MatrixDB():
         self.lock.release()
         return messageIndex
 
-    def createNewChain(self, name):
+    def createNewChain(self):
         self.lock.acquire()
         chainIndex = self.arrayOfChains.size()
-        self.arrayOfChains.add(ChainEntry(chainIndex, chainIndex - self.deletedChainCount, name))
+        # Handle Example
+        if chainIndex == 0:
+            self.arrayOfChains.add(ChainEntry(
+                chainIndex,
+                chainIndex - self.deletedChainCount,
+                "[Sample Chain]",
+                "1",
+                "StartAfter(.*?)EndAt",
+                "2,4-6",
+                "StartAfter(.*?)EndAt"))
+        else:
+            self.arrayOfChains.add(ChainEntry(chainIndex, chainIndex - self.deletedChainCount))
 
         self.lock.release()
         return chainIndex
@@ -978,7 +988,6 @@ class MatrixDB():
                     toRegex,
                     user._deleted
                     ))
-
             else: 
                 # Normal User
                 token = [""] if not user._token else user._token.split(self.COOKIE_HEADER_SERIALIZE_CODE)
@@ -1223,13 +1232,13 @@ class UserTableModel(AbstractTableModel):
         userEntry = self._db.getUserByRow(rowIndex)
         if userEntry:
             if columnIndex == 0:
-                return str(userEntry._name)
+                return userEntry._name
             elif columnIndex == 1:
-                return str(userEntry._cookies)
+                return userEntry._cookies
             elif columnIndex == 2:
-                return str(userEntry._header)
+                return userEntry._header
             elif columnIndex == 3:
-                return str(userEntry._postargs)
+                return userEntry._postargs
             else:
                 roleEntry = self._db.getRoleByColumn(columnIndex, 'u')
                 if roleEntry:
@@ -1490,11 +1499,11 @@ class ChainTableModel(AbstractTableModel):
         elif columnIndex == 2:
             return "SRC - Message ID"
         elif columnIndex == 3:
-            return "SRC - Regex"
+            return "Regex - Extract from Source HTTP Response"
         elif columnIndex == 4:
             return "DEST - Message ID"
         elif columnIndex == 5:
-            return "DEST - Regex"
+            return "Regex - Replace into Destination HTTP Request"
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
@@ -1795,7 +1804,7 @@ class RoleEntry:
 
 class ChainEntry:
 
-    def __init__(self, index, tableRow, name, fromID="", fromRegex="", toID="", toRegex="", deleted=False, enabled=False):
+    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, enabled=False):
         self._index = index
         self._fromID = fromID
         self._fromRegex = fromRegex
