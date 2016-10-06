@@ -130,6 +130,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     if type(component) is JTableHeader:
                         table = component.getTable()
                         column = component.columnAtPoint(e.getPoint())
+                        # TODO wrap this string
                         if type(table) is MessageTable and column >= selfExtender._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT or type(table) is UserTable and column >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT:
                             selfExtender._selectedColumn = column
                         else:
@@ -1050,7 +1051,14 @@ class MatrixDB():
                 toID+self.COOKIE_HEADER_SERIALIZE_CODE+toRegex
                 ))
 
-        ret = MatrixDBData(serializedMessages,serializedRoles, serializedUsers, self.deletedUserCount, self.deletedRoleCount, self.deletedMessageCount)
+        ret = MatrixDBData(
+            serializedMessages,
+            serializedRoles,
+            serializedUsers,
+            self.deletedUserCount,
+            self.deletedRoleCount,
+            self.deletedMessageCount)
+
         self.lock.release()
         return ret
 
@@ -1453,7 +1461,7 @@ class MessageTable(JTable):
         # For now it sounds like this does not need to be locked, since its only manual operations
         for messageIndex in self._viewerMap:
             requestViewer = self._viewerMap[messageIndex]
-            if requestViewer and requestViewer.isMessageModified():
+            if requestViewer and requestViewer.isMessageModified(): # TODO BUG: this doesnt detect change body encoding or change request method
                 messageEntry = self.getModel()._db.arrayOfMessages[messageIndex]
                 newMessage = requestViewer.getMessage()
                 messageEntry._requestResponse = RequestResponseStored(self._extender, request=newMessage, httpService=messageEntry._requestResponse.getHttpService())                
