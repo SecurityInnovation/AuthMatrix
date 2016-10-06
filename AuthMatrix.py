@@ -1495,7 +1495,7 @@ class ChainTableModel(AbstractTableModel):
         if columnIndex == 0:
             return "Enabled"
         elif columnIndex == 1:
-            return "Chain"
+            return "Chain Name"
         elif columnIndex == 2:
             return "SRC - Message ID"
         elif columnIndex == 3:
@@ -1579,7 +1579,8 @@ class ChainTable(JTable):
         if self.getModel().getColumnCount() > 1:
             self.getColumnModel().getColumn(0).setMinWidth(60);
             self.getColumnModel().getColumn(0).setMaxWidth(60);
-            self.getColumnModel().getColumn(1).setMinWidth(60);
+            self.getColumnModel().getColumn(1).setMinWidth(120);
+            self.getColumnModel().getColumn(1).setMaxWidth(240);
             self.getColumnModel().getColumn(2).setMinWidth(150);
             self.getColumnModel().getColumn(2).setMaxWidth(150);        
             self.getColumnModel().getColumn(3).setMinWidth(180);
