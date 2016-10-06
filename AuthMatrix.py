@@ -732,6 +732,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     for c in self._db.getActiveChainIndexes():
                         chain = self._db.arrayOfChains[c]
                         if chain._fromID == str(messageIndex) and chain._enabled:
+                            # TODO, if set to singleUserSource, replace into all users
                             match = re.search(chain._fromRegex, response, re.DOTALL)
                             if match and len(match.groups()):
                                 result = match.group(1)
@@ -807,7 +808,7 @@ class MatrixDB():
     def __init__(self):
         # Holds all custom data
         # NOTE: consider moving these constants to a different class
-        self.STATIC_USER_TABLE_COLUMN_COUNT = 4
+        self.STATIC_USER_TABLE_COLUMN_COUNT = 5
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 6
         self.LOAD_TIMEOUT = 3.0
@@ -1192,6 +1193,11 @@ class MatrixDB():
         for i in self.getActiveUserIndexes():
             self.arrayOfUsers[i].clearChainResults()
 
+    def getUserByName(self, name):
+        for i in self.getActiveUserIndexes():
+            if self.arrayOfUsers[i]._name == name:
+                return self.arrayOfUsers[i]
+
 ##
 ## Tables and Table Models  
 ##
@@ -1209,13 +1215,16 @@ class UserTableModel(AbstractTableModel):
 
         
     def getColumnName(self, columnIndex):
+
         if columnIndex == 0:
-            return "User"
+            return "ID"
         elif columnIndex == 1:
-            return "Cookies"
+            return "User Name"
         elif columnIndex == 2:
-            return "HTTP Header"
+            return "Cookies"
         elif columnIndex == 3:
+            return "HTTP Header"
+        elif columnIndex == 4:
             return "HTTP Parameter (CSRF)"
         else:
             roleEntry = self._db.getRoleByColumn(columnIndex, 'u')
@@ -1227,12 +1236,14 @@ class UserTableModel(AbstractTableModel):
         userEntry = self._db.getUserByRow(rowIndex)
         if userEntry:
             if columnIndex == 0:
-                return userEntry._name
+                return userEntry._index
             elif columnIndex == 1:
-                return userEntry._cookies
+                return userEntry._name
             elif columnIndex == 2:
-                return userEntry._header
+                return userEntry._cookies
             elif columnIndex == 3:
+                return userEntry._header
+            elif columnIndex == 4:
                 return userEntry._postargs
             else:
                 roleEntry = self._db.getRoleByColumn(columnIndex, 'u')
@@ -1250,13 +1261,13 @@ class UserTableModel(AbstractTableModel):
             return
         userEntry = self._db.getUserByRow(row)
         if userEntry:
-            if col == 0:
+            if col == 1:
                 userEntry._name = val
-            elif col == 1:
-                userEntry._cookies = val
             elif col == 2:
-                userEntry._header = val
+                userEntry._cookies = val
             elif col == 3:
+                userEntry._header = val
+            elif col == 4:
                 userEntry._postargs = val
             else:
                 roleIndex = self._db.getRoleByColumn(col, 'u')._index
@@ -1266,7 +1277,9 @@ class UserTableModel(AbstractTableModel):
 
     # Set checkboxes and role editable
     def isCellEditable(self, row, col):
-        return True
+        if col > 0:
+            return True
+        return False
         
     # Create checkboxes
     def getColumnClass(self, columnIndex):
@@ -1288,21 +1301,26 @@ class UserTable(JTable):
         self.getModel().fireTableDataChanged()
         
         # Resize
+        # ID
+        self.getColumnModel().getColumn(0).setMinWidth(30);
+        self.getColumnModel().getColumn(0).setMaxWidth(30);
+
+
         # User Name
-        self.getColumnModel().getColumn(0).setMinWidth(100);
-        self.getColumnModel().getColumn(0).setMaxWidth(1000);
+        self.getColumnModel().getColumn(1).setMinWidth(100);
+        self.getColumnModel().getColumn(1).setMaxWidth(1000);
 
         # Cookie
-        self.getColumnModel().getColumn(1).setMinWidth(300);
-        self.getColumnModel().getColumn(1).setMaxWidth(1500);
-
-        # Header
-        self.getColumnModel().getColumn(2).setMinWidth(150);
+        self.getColumnModel().getColumn(2).setMinWidth(300);
         self.getColumnModel().getColumn(2).setMaxWidth(1500);
 
-        # POST args
+        # Header
         self.getColumnModel().getColumn(3).setMinWidth(150);
         self.getColumnModel().getColumn(3).setMaxWidth(1500);
+
+        # POST args
+        self.getColumnModel().getColumn(4).setMinWidth(150);
+        self.getColumnModel().getColumn(4).setMaxWidth(1500);
 
         self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
 
