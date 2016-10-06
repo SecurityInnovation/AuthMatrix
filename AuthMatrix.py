@@ -307,31 +307,20 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         buttons.add(loadButton)
         buttons.add(clearButton)
 
-
-        advancedLabel = JLabel("Advanced Configuration - Chains")
-        #advancedLabel.setForeground(Color.black);
-        #advancedLabel.setBackground(Color.lightGray);
-        #advancedLabel.setOpaque(True)
-        font = advancedLabel.getFont()
-        font = Font(font.getFontName(), Font.BOLD, font.getSize())
-        advancedLabel.setFont(font)
-
         # Top pane
         firstPane = JSplitPane(JSplitPane.VERTICAL_SPLIT,roleScrollPane,messageScrollPane)
-        secondPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, advancedLabel,chainScrollPane)
-        topPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, firstPane, secondPane)
+        self._topPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, firstPane, chainScrollPane)
         bottomPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, self._tabs, buttons)
 
         # Main Pane
-        self._splitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT, topPane, bottomPane)
+        self._splitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT, self._topPane, bottomPane)
         
 
 
         # customize our UI components
         callbacks.customizeUiComponent(self._splitpane)
         callbacks.customizeUiComponent(firstPane)
-        callbacks.customizeUiComponent(secondPane)
-        callbacks.customizeUiComponent(topPane)
+        callbacks.customizeUiComponent(self._topPane)
         callbacks.customizeUiComponent(bottomPane)
         callbacks.customizeUiComponent(messageScrollPane)
         callbacks.customizeUiComponent(roleScrollPane)
@@ -340,14 +329,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         callbacks.customizeUiComponent(self._userTable)
         callbacks.customizeUiComponent(self._chainTable)
         callbacks.customizeUiComponent(self._tabs)
-        callbacks.customizeUiComponent(advancedLabel)
         callbacks.customizeUiComponent(buttons)
 
         self._splitpane.setResizeWeight(0.5)
         firstPane.setResizeWeight(0.35)
-        topPane.setResizeWeight(0.80)
+        self._topPane.setResizeWeight(0.8)
         bottomPane.setResizeWeight(0.95)
-
 
         # Handles checkbox color coding
         # Must be bellow the customizeUiComponent calls
@@ -1489,9 +1476,15 @@ class ChainTableModel(AbstractTableModel):
         return self._db.getActiveChainCount()
         
     def getColumnCount(self):
+        # Disable if there arent any chains
+        if not self._db.getActiveChainCount():
+            return 1
         return self._db.STATIC_CHAIN_TABLE_COLUMN_COUNT
 
     def getColumnName(self, columnIndex):
+        if self.getColumnCount() == 1:
+            return ""
+
         if columnIndex == 0:
             return "Enabled"
         elif columnIndex == 1:
@@ -1507,6 +1500,9 @@ class ChainTableModel(AbstractTableModel):
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
+        if self.getColumnCount() == 1:
+            return ""
+
         chainEntry = self._db.getChainByRow(rowIndex)
         if chainEntry:
             if columnIndex == 0:
@@ -1571,16 +1567,18 @@ class ChainTable(JTable):
         self.getModel().fireTableStructureChanged()
         self.getModel().fireTableDataChanged()
         
-       # Resize
-        self.getColumnModel().getColumn(0).setMinWidth(60);
-        self.getColumnModel().getColumn(0).setMaxWidth(60);
-        self.getColumnModel().getColumn(1).setMinWidth(60);
-        self.getColumnModel().getColumn(2).setMinWidth(135);
-        self.getColumnModel().getColumn(2).setMaxWidth(135);        
-        self.getColumnModel().getColumn(3).setMinWidth(180);
-        self.getColumnModel().getColumn(4).setMinWidth(135);
-        self.getColumnModel().getColumn(4).setMaxWidth(135);        
-        self.getColumnModel().getColumn(5).setMinWidth(180);
+        # Resize
+
+        if self.getModel().getColumnCount() > 1:
+            self.getColumnModel().getColumn(0).setMinWidth(60);
+            self.getColumnModel().getColumn(0).setMaxWidth(60);
+            self.getColumnModel().getColumn(1).setMinWidth(60);
+            self.getColumnModel().getColumn(2).setMinWidth(135);
+            self.getColumnModel().getColumn(2).setMaxWidth(135);        
+            self.getColumnModel().getColumn(3).setMinWidth(180);
+            self.getColumnModel().getColumn(4).setMinWidth(135);
+            self.getColumnModel().getColumn(4).setMaxWidth(135);        
+            self.getColumnModel().getColumn(5).setMinWidth(180);
 
 
 # For color-coding checkboxes in the message table
