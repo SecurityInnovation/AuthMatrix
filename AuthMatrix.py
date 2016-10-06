@@ -1492,11 +1492,11 @@ class ChainTableModel(AbstractTableModel):
         elif columnIndex == 2:
             return "SRC - Message ID"
         elif columnIndex == 3:
-            return "Regex - Extract from Source HTTP Response"
+            return "Regex - Extract from HTTP Response"
         elif columnIndex == 4:
             return "DEST - Message ID(s)"
         elif columnIndex == 5:
-            return "Regex - Replace into Destination HTTP Request"
+            return "Regex - Replace into HTTP Request"
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
@@ -1573,11 +1573,11 @@ class ChainTable(JTable):
             self.getColumnModel().getColumn(0).setMinWidth(60);
             self.getColumnModel().getColumn(0).setMaxWidth(60);
             self.getColumnModel().getColumn(1).setMinWidth(60);
-            self.getColumnModel().getColumn(2).setMinWidth(135);
-            self.getColumnModel().getColumn(2).setMaxWidth(135);        
+            self.getColumnModel().getColumn(2).setMinWidth(150);
+            self.getColumnModel().getColumn(2).setMaxWidth(150);        
             self.getColumnModel().getColumn(3).setMinWidth(180);
-            self.getColumnModel().getColumn(4).setMinWidth(135);
-            self.getColumnModel().getColumn(4).setMaxWidth(135);        
+            self.getColumnModel().getColumn(4).setMinWidth(150);
+            self.getColumnModel().getColumn(4).setMaxWidth(150);        
             self.getColumnModel().getColumn(5).setMinWidth(180);
 
 
