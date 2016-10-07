@@ -823,7 +823,7 @@ class MatrixDB():
         self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
         self.LOAD_TIMEOUT = 3.0
         self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
-        self.COOKIE_HEADER_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
+        self.AUTHMATRIX_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
         self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
 
         self.lock = Lock()
@@ -968,12 +968,19 @@ class MatrixDB():
                 # Chain
                 self.deletedChainCount = user._roles
                 
-                name = "" if not user._name else user._name
-                token = user._token.split(self.COOKIE_HEADER_SERIALIZE_CODE)
+                name=""
+                sourceUser=""
+                if user._name:
+                    namesplit = user._name.split(self.AUTHMATRIX_SERIALIZE_CODE)
+                    name=namesplit[0]
+                    if len(namesplit)>1:
+                        sourceUser=namesplit[1]
+
+                token = user._token.split(self.AUTHMATRIX_SERIALIZE_CODE)
                 assert(len(token)==2)
                 fromID = token[0]
                 fromRegex = token[1]
-                staticcsrf = user._staticcsrf.split(self.COOKIE_HEADER_SERIALIZE_CODE)
+                staticcsrf = user._staticcsrf.split(self.AUTHMATRIX_SERIALIZE_CODE)
                 assert(len(staticcsrf)==2)
                 toID = staticcsrf[0]
                 toRegex = staticcsrf[1]
@@ -985,11 +992,12 @@ class MatrixDB():
                     fromRegex,
                     toID,
                     toRegex,
-                    user._deleted
+                    user._deleted,
+                    sourceUser
                     ))
             else: 
                 # Normal User
-                token = [""] if not user._token else user._token.split(self.COOKIE_HEADER_SERIALIZE_CODE)
+                token = [""] if not user._token else user._token.split(self.AUTHMATRIX_SERIALIZE_CODE)
                 cookies = token[0]
                 header = "" if len(token)==1 else token[1]
                 name = "" if not user._name else user._name
@@ -1036,7 +1044,7 @@ class MatrixDB():
             header = user._header if user._header else ""
             name = user._name if user._name else ""
             postargs = user._postargs if user._postargs else ""
-            token = cookies + self.COOKIE_HEADER_SERIALIZE_CODE + header
+            token = cookies + self.AUTHMATRIX_SERIALIZE_CODE + header
             serializedUsers.append(UserEntryData(
                 user._index,
                 user._tableRow,
@@ -1048,6 +1056,7 @@ class MatrixDB():
         # NOTE to preserve backwords compatability, chains are stored in UserEntries in a really hacky way
         for chain in self.arrayOfChains:
             name = chain._name if chain._name else ""
+            nameAndSourceUser = name if not chain._sourceUser else name+self.AUTHMATRIX_SERIALIZE_CODE+chain._sourceUser
             fromID = chain._fromID if chain._fromID else ""
             fromRegex = chain._fromRegex if chain._fromRegex else ""
             toID = chain._toID if chain._toID else ""
@@ -1055,11 +1064,11 @@ class MatrixDB():
             serializedUsers.append(UserEntryData(
                 chain._index,
                 chain._tableRow,
-                name,
+                nameAndSourceUser,
                 self.deletedChainCount,
                 chain._deleted,
-                fromID+self.COOKIE_HEADER_SERIALIZE_CODE+fromRegex,
-                toID+self.COOKIE_HEADER_SERIALIZE_CODE+toRegex
+                fromID+self.AUTHMATRIX_SERIALIZE_CODE+fromRegex,
+                toID+self.AUTHMATRIX_SERIALIZE_CODE+toRegex
                 ))
 
         ret = MatrixDBData(
@@ -1920,7 +1929,6 @@ class ChainEntry:
                 if part.isdigit():
                     a = int(part)
                     result.append(a)
-        print result
         return result
 
 
