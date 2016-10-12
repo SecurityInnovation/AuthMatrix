@@ -1,3 +1,40 @@
+v0.6.0 - MAJOR UPDATE - 10/11/2016
+
+STATE FILE COMPATIBILITY - v0.5.2 and greater
+
+* Chains:
+ - New advanced configuration table for chaining several messages together
+ - Can be used for Advanced CSRF Token handling or propagating IDs/GUIDs to later messages
+ - See README for instructions and examples
+
+* Added Drag-and-Drop Reorder for Requests in Message Table:
+ - Required to support Chains
+
+* New Columns in User and Message Table:
+ - Separate columns for cookies, headers, and POST args for clarity
+ - Supports use-case where user requires both a header and cookies
+ - Both tables now use index identifier instead of row number
+
+* Update Color Scheme:
+ - Blue for False Positive and purple for Failure Regex
+ - Colored highlighting of selected rows
+
+* Allow Editing base requests from AuthMatrix
+ - Only works when the message has been altered with a keyboard (i.e. not "Change request method" or "Change body encoding")
+ - https://support.portswigger.net/customer/en/portal/questions/16705314-imessageeditor-ismessagemodified-does-not-detect-modification
+
+* Change Target Domain:
+ - You can now right click selected messages and change the target domain/port/tls configuration
+
+* Bug Fixes:
+ - no longer sends each base request on Load State
+ - correctly times out during Run when host is unreachable
+ - handle empty session tokens correctly
+ - check if the HTTP Response is empty in checkResults() and handle appropriately 
+ - run messages in order by row number, not by index
+ - when deleting items, decrement row if the row is affected by the change, not the index
+
+
 v0.5.4 - 09/26/2016
 
 STATE FILE COMPATIBILITY - v0.5.2 and greater
