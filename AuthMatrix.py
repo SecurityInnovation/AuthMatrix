@@ -1244,7 +1244,7 @@ class UserTableModel(AbstractTableModel):
         elif columnIndex == 3:
             return "HTTP Header"
         elif columnIndex == 4:
-            return "HTTP Parameter (CSRF)"
+            return "HTTP Parameter (CSRF)" # Rename and remove CSRF?
         else:
             roleEntry = self._db.getRoleByColumn(columnIndex, 'u')
             if roleEntry:

@@ -49,10 +49,6 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
   * Blue indicates that the result may be a false positive.  (This generally means there is an invalid/expired session token or an incorrect regex)
 
-# Advanced Usage (Chains)
-
-TODO
-
 ## Sample AuthMatrix Configuration
 
 ![Sample AuthMatrix Configuration]
@@ -64,8 +60,27 @@ TODO
 (img2.png)
 
 
-## Invalid AuthMatrix Configuration (False Positives Detected)
+## False Positives Detected (Invalid Response Regex)
 
-![Invalid AuthMatrix Configuration]
+![Invalid Response Regex]
 (img3.png)
 
+
+## False Positives Detected (Invalid Session Tokens)
+
+![Invalid Session Tokens]
+(img4.png)
+
+# Advanced Usage (Chains)
+
+TODO
+
+## Chains for Advanced CSRF
+
+![Chain for CSRF]
+(img5.png)
+
+## Chain for Testing Created Identifiers (Pitchfork Mode)
+
+![Chain Pitchfork]
+(img6.png)
