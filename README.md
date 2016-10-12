@@ -1,46 +1,57 @@
 # AuthMatrix v0.6.0
 
-AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services. With AuthMatrix, testers focus on thoroughly defining tables of users, roles, and requests for their specific target application upfront. These tables are displayed through the UI in a similar format to that of an access control matrix commonly built in various threat modeling methodologies.
+AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services. With AuthMatrix, testers focus on thoroughly defining tables of users, roles, and requests for their specific target application upfront. These tables are displayed through the UI in a similar format to that of an access control matrix common in various threat modeling methodologies.
 
-Once the tables have been assembled, testers can use the simple click-to-run interface to efficiently run all combinations of roles and requests. Testers can then confirm their results with an easy to read, color-coded interface indicating any authorization vulnerabilities detected in the system. Additionally, the extension provides the ability to save and load target configurations for simple regression testing.
+Once the tables have been assembled, testers can use the simple click-to-run interface to kick off all combinations of roles and requests. The results can be confirmed with an easy to read, color-coded interface indicating any authorization vulnerabilities detected in the system. Additionally, the extension provides the ability to save and load target configurations for simple regression testing.
 
 # Installation
 
-AuthMatrix can be easily installed through the Burp Suite BApp Store. From within Burp Suite, select the Extender tab, select the BApp Store, select AuthMatrix and click install.
+AuthMatrix can be installed through the Burp Suite BApp Store. From within Burp Suite, select the Extender tab, select the BApp Store, select AuthMatrix, and click install.
 
-For Manual installation, download AuthMatrix.py from this repository.  Then from within Burp Suite, select the Extender tab, click the Add button, change the Extension type to Python and select the AuthMatrix python file.
+For Manual installation, download AuthMatrix.py from this repository.  Then from within Burp Suite, select the Extender tab, click the Add button, change the Extension type to Python, and select the AuthMatrix python file.
 
 ### Note
 
-AuthMatrix requires configuring Burp Suite to use Jython.  Easy instructions for this can be located at the following URL.
+AuthMatrix requires configuring Burp Suite to use Jython.  Easy instructions for this are located at the following URL.
 
 https://portswigger.net/burp/help/extender.html#options_pythonenv
 
 Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
-# Usage
+# Basic Usage
 
-* In AuthMatrix, create roles for all privilege levels within the target application.  Common roles may include User, Admin, and Anonymous.
+1. Create roles for all privilege levels within the target application.  (Common roles may include User, Admin, and Anonymous)
 
-* Create users that fit these various roles and check all roles that the user belongs to.  If a user is part of multiple roles, check each role individually.
+2. Create enough users to fit these various roles and select the checkboxes for all roles that the user belongs to.
 
-* From another area of Burp Suite (i.e. Target tab, Repeater Tab, etc) right click a request and select "Send to AuthMatrix." This will create a new item in the second table of the interface.  Multiple requests can be added all at once by selecting several requests from within the Target tab.
+3. From another area of Burp Suite (i.e. Target tab, Repeater Tab, etc) right click a request and select "Send to AuthMatrix." 
 
-* In the second table of AuthMatrix, check all roles that are authorized to make each request.
+4. In the second table of AuthMatrix, select the checkboxes for all roles that are authorized to make each HTTP request.
 
-* Create a regex based on the expected response behavior of the request to determine if the action has succeeded. Common regexes include HTTP Response headers, success messages within the body, or other variations within the body of the page.
+5. Create a Response Regex based on the expected response behavior of the request to determine if the action has succeeded. 
 
-* Generate session tokens for each user via a web browser or the repeater tab and enter them into the correct field within the first table.
+  * Common regexes include HTTP Response headers, success messages within the body, or other variations within the body of the page.
 
-* OPTIONAL: If the target application uses user-specific reusable CSRF tokens, enter them into the correct field within the first table. Advanced CSRF protection handling is not currently supported in AuthMatrix.
+  * NOTE: Messages can be configured to use a Failure Regex instead through the right-click menu (i.e. Anonymous should never receive an HTTP 200)
 
-* Click Run to run all requests or right click several messages and select run.  Observe that the adjacent table will show color-coded results
+6. Generate session tokens for each user from the Repeater tab and enter them into the relevant column within the first table (Cookies, HTTP Header, HTTP Parameter).
 
-  * Green indicates the request returned expected results
+  * If the target uses static CSRF tokens, place these into the HTTP Parameter column
 
-  * Red indicates the request did not return expected results and may contain a vulnerability
+  * NOTE: Multiple cookies can be added using a ";" seperator. Currently, only one HTTP Header or HTTP Parameter is supported.
 
-  * Orange indicates that the result may be a false positive.  This generally means there is an invalid/expired session token or an incorrect success regex.
+
+7. Click Run at the bottom to run all requests or right click several messages and select run.  Observe that the adjacent table will show color-coded results.
+
+  * Green indicates no vulnerability detected
+
+  * Red indicates the request may contain a vulnerability
+
+  * Blue indicates that the result may be a false positive.  (This generally means there is an invalid/expired session token or an incorrect regex)
+
+# Advanced Usage (Chains)
+
+TODO
 
 ## Sample AuthMatrix Configuration
 
