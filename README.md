@@ -38,7 +38,7 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
   * If the target uses static CSRF tokens, place these into the HTTP Parameter column
 
-  * NOTE: Multiple cookies can be added using a ";" seperator. Currently, only one HTTP Header or HTTP Parameter is supported.
+  * NOTE: Multiple cookies can be added using a ";" separator. Currently, only one HTTP Header or HTTP Parameter is supported.
 
 
 7. Click Run at the bottom to run all requests or right click several messages and select run.  Observe that the adjacent table will show color-coded results.
@@ -52,33 +52,33 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 ## Sample AuthMatrix Configuration
 
 ![Sample AuthMatrix Configuration]
-(img1.png)
+(images/img1.png)
 
 
 ## False Positives Detected (Invalid Session Tokens)
 
 ![Invalid Session Tokens]
-(img4.png)
+(images/img2.png)
 
 # Advanced Usage
 
 ## Failure Regex Mode
 
-In certain instances, it may be easier to configure AuthMatrix to alert when a request fails for a user rather than succeeds.  To do this, right click the request and select "Toggle Regex Mode".  The regex field will highlighted in purple to indicate that AuthMatrix will label a run failed when that regex is detected.
+For certain targets, it may be easier to configure AuthMatrix to alert when a request fails with a specific role rather than succeeds.  To do this, right click the request and select "Toggle Regex Mode".  The regex field will be highlighted in purple to indicate that AuthMatrix will label a run as failed when that regex is detected.
 
 
 ## Sample Configuration with Failure Regex Mode
 
 ![Sample Configuration with Failure Regex Mode]
-(img2.png)
+(images/img3.png)
 
 ## Chains
 
-Chains provide a way to copy a value from the response of one request to the body/headers of another request.
+Chains provide a way to copy a value from the response of one request to the body of another request.
 
 The most common use cases for this are:
 
-1. Copying CSRF Tokens when an application generates user-specific tokens for each request
+1. Copying CSRF Tokens over when a target generates new user-specific tokens with each request
 
 2. Testing newly created IDs/GUIDs for authorization issues
 
@@ -86,35 +86,35 @@ A Chain entry has the following values:
 
 * __Enabled:__ a checkbox to enable/disable the chain (useful for debugging)
 
-* __Chain Name:__ a simple name used for organization
+* __Chain Name:__ a descriptive name
 
-* __SRC - Message ID:__ The message ID of the Source request in the message table
+* __SRC - Message ID:__ The message ID of the source request in the message table
 
-* __SRC - User ID:__ The source user for Pitchfork Mode (See Below)
+* __SRC - User ID:__ (OPTIONAL) The source user for Pitchfork Mode (See Below)
 
-* __Regex - Extract from HTTP Response:__ a regex used to extract the targeted value from the response of the source message.  This must contain one paranthesis grouping to be extracted (i.e. (.*) )
+* __SRC - Regex:__ a regex used to extract a value from the response of the source message.  This must contain one parenthesis grouping that is to be extracted [i.e. (.*)]
 
-* __DEST - Message ID(s):__ a list of message IDs for the destination requests that the source value will be replaced into.  Can contain numbers, commas, and dashes to indicate a range.
+* __DEST - Message ID(s):__ a list of message IDs for the destination requests that the source value will be replaced into.  Can contain numbers, commas, and/or dashes to indicate a range.
 
-* __Regex - Replace into HTTP Request:__ a regex used to determine the where the extracted value is to be inserted.  This must contain one paranthesis grouping to be replaced (i.e. (.*) )
+* __DEST - Regex:__ a regex used to determine the where the extracted value is to be inserted.  This must contain one parenthesis grouping to be replaced [i.e. (.*)]
 
-NOTE: Messages are run in order of row, so the destination messages must be listed after the source message in order to successfully replace the value.  Messages can be moved in the table by selecting and dragging the entry.
+__NOTE:__ Messages are run in order of row, so the destination messages must be listed after the source message in order to successfully replace the value.  Messages can be moved in the table by selecting and dragging the entry.
 
 ## Chains - Pitchfork Mode
 
 There are two modes in which chains can be used: Standard and Pitchfork
 
-In Standard Mode each source value will be replaced into the message body for that specific user.  This is most useful for CSRF, since these tokens will need to be user specific.  This mode does not test authorization with this chain, but will be useful in order to run an AuthMatrix configuration successfully.  To set a chain to Standard Mode, leave the SRC - User ID field empty. 
+__Standard Mode:__ A source value will be collected for each user and then placed into that corresponding user's message body.  This is most useful for CSRF, since these tokens will be user specific.  Chains in this mode do not directly test authorization, but may be useful in order to run an AuthMatrix configuration successfully.  To set a chain to Standard Mode, leave the **SRC - User ID** field empty. 
 
-In Pitchform Mode the source value is extracted from the response for only one selected user and is then inserted into the request of all users.  This is most useful to test new authorization cases where an identifier must only accessible for that one specific user. 
+__Pitchfork Mode:__ The source value is extracted from the response for only one selected user and is then inserted into the requests of all users.  This is most useful to test new authorization cases where an identifier must only accessible to only that one specific user. Pitchfork Mode is enabled by selecting the User ID of the user whose response value is to be propagated.
 
 ## Chains for Advanced CSRF
 
 ![Chain for CSRF]
-(img5.png)
+(images/img5.png)
 
 ## Chain for New Identifiers (Pitchfork Mode)
 
 ![Chain Pitchfork]
-(img6.png)
+(images/img6.png)
 
