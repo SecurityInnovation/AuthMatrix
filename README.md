@@ -54,33 +54,67 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 ![Sample AuthMatrix Configuration]
 (img1.png)
 
-## Sample Configuration with Failure Regex Mode
-
-![Sample Configuration with Failure Regex Mode]
-(img2.png)
-
-
-## False Positives Detected (Invalid Response Regex)
-
-![Invalid Response Regex]
-(img3.png)
-
 
 ## False Positives Detected (Invalid Session Tokens)
 
 ![Invalid Session Tokens]
 (img4.png)
 
-# Advanced Usage (Chains)
+# Advanced Usage
 
-TODO
+## Failure Regex Mode
+
+In certain instances, it may be easier to configure AuthMatrix to alert when a request fails for a user rather than succeeds.  To do this, right click the request and select "Toggle Regex Mode".  The regex field will highlighted in purple to indicate that AuthMatrix will label a run failed when that regex is detected.
+
+
+## Sample Configuration with Failure Regex Mode
+
+![Sample Configuration with Failure Regex Mode]
+(img2.png)
+
+## Chains
+
+Chains provide a way to copy a value from the response of one request to the body/headers of another request.
+
+The most common use cases for this are:
+
+1. Copying CSRF Tokens when an application generates user-specific tokens for each request
+
+2. Testing newly created IDs/GUIDs for authorization issues
+
+A Chain entry has the following values:
+
+* __Enabled:__ a checkbox to enable/disable the chain (useful for debugging)
+
+* __Chain Name:__ a simple name used for organization
+
+* __SRC - Message ID:__ The message ID of the Source request in the message table
+
+* __SRC - User ID:__ The source user for Pitchfork Mode (See Below)
+
+* __Regex - Extract from HTTP Response:__ a regex used to extract the targeted value from the response of the source message.  This must contain one paranthesis grouping to be extracted (i.e. (.*) )
+
+* __DEST - Message ID(s):__ a list of message IDs for the destination requests that the source value will be replaced into.  Can contain numbers, commas, and dashes to indicate a range.
+
+* __Regex - Replace into HTTP Request:__ a regex used to determine the where the extracted value is to be inserted.  This must contain one paranthesis grouping to be replaced (i.e. (.*) )
+
+NOTE: Messages are run in order of row, so the destination messages must be listed after the source message in order to successfully replace the value.  Messages can be moved in the table by selecting and dragging the entry.
+
+## Chains - Pitchfork Mode
+
+There are two modes in which chains can be used: Standard and Pitchfork
+
+In Standard Mode each source value will be replaced into the message body for that specific user.  This is most useful for CSRF, since these tokens will need to be user specific.  This mode does not test authorization with this chain, but will be useful in order to run an AuthMatrix configuration successfully.  To set a chain to Standard Mode, leave the SRC - User ID field empty. 
+
+In Pitchform Mode the source value is extracted from the response for only one selected user and is then inserted into the request of all users.  This is most useful to test new authorization cases where an identifier must only accessible for that one specific user. 
 
 ## Chains for Advanced CSRF
 
 ![Chain for CSRF]
 (img5.png)
 
-## Chain for Testing Created Identifiers (Pitchfork Mode)
+## Chain for New Identifiers (Pitchfork Mode)
 
 ![Chain Pitchfork]
 (img6.png)
+
