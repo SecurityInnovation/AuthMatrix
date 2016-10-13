@@ -96,7 +96,7 @@ A Chain entry has the following values:
 
 * __DEST - Message ID(s):__ a list of message IDs for the destination requests that the source value will be replaced into.  Can contain numbers, commas, and/or dashes to indicate a range.
 
-* __DEST - Regex:__ a regex used to determine the where the extracted value is to be inserted.  This must contain one parenthesis grouping to be replaced [i.e. (.*)]
+* __DEST - Regex:__ a regex used to determine where the extracted value is to be inserted.  This must contain one parenthesis grouping to be replaced [i.e. (.*)]
 
 __NOTE:__ Messages are run in order of row, so the destination messages must be listed after the source message in order to successfully replace the value.  Messages can be moved in the table by selecting and dragging the entry.
 
