@@ -68,7 +68,7 @@ For certain targets, it may be easier to configure AuthMatrix to detect the resp
 
 To do this, right click the request and select "Toggle Regex Mode".  The regex field will be highlighted in purple to indicate that AuthMatrix will run the request in Failure Regex Mode.
 
-NOTE: False positive detection and highlighting will not work in Failure Regex Mode
+__NOTE:__ False positive detection and highlighting may not work in Failure Regex Mode
 
 ## Sample Configuration with Failure Regex Mode
 
