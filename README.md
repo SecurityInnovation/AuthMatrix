@@ -1,4 +1,4 @@
-# AuthMatrix v0.6.0
+# AuthMatrix v0.6.1
 
 AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services. With AuthMatrix, testers focus on thoroughly defining tables of users, roles, and requests for their specific target application upfront. These tables are displayed through the UI in a similar format to that of an access control matrix common in various threat modeling methodologies.
 
@@ -64,8 +64,11 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
 ## Failure Regex Mode
 
-For certain targets, it may be easier to configure AuthMatrix to alert when a request fails with a specific role rather than succeeds.  To do this, right click the request and select "Toggle Regex Mode".  The regex field will be highlighted in purple to indicate that AuthMatrix will label a run as failed when that regex is detected.
+For certain targets, it may be easier to configure AuthMatrix to detect the response condition of when a request has failed. For example, if a target site returns unique data on successful requests, but always returns an HTTP 303 when an unauthorized action is performed. In this mode, AuthMatrix will validate this regex for all users not part of a succeeding role.
 
+To do this, right click the request and select "Toggle Regex Mode".  The regex field will be highlighted in purple to indicate that AuthMatrix will run the request in Failure Regex Mode.
+
+NOTE: False positive detection and highlighting will not work in Failure Regex Mode
 
 ## Sample Configuration with Failure Regex Mode
 

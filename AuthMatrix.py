@@ -81,7 +81,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.6.0")
+        callbacks.setExtensionName("AuthMatrix - v0.6.1")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -775,18 +775,20 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             userEntry = self._db.arrayOfUsers[userIndex]
 
             ignoreUser = False
+
+            # NOTE: When using failure regex, all users not in a checked role must see that regex
+
             # if user is not in this role, ignore it
             if not userEntry._roles[roleIndex]:
                 ignoreUser = True
 
             else:
-                # This is modified with the addition of Failure Regexes
-                # If user is in any other role that should succeed (or should fail), then ignore it
+                # If user is in any other checked role, then ignore it
                 for index in self._db.getActiveRoleIndexes():
                     if not index == roleIndex and userEntry._roles[index]:
-                        if (index in activeCheckBoxedRoles and not messageEntry.isFailureRegex()) or (index not in activeCheckBoxedRoles and messageEntry.isFailureRegex()):
+                        if index in activeCheckBoxedRoles:
                             ignoreUser = True
-
+                    
             if not ignoreUser:
                 if not userEntry._index in messageEntry._userRuns:
                     print "ERROR: HTTP Requests Failed During Run"
@@ -796,17 +798,18 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if not response:
                     print "ERROR: No HTTP Response (Likely Invalid Target Host)"
                     return False
+                
                 resp = StringUtil.fromBytes(response)
                 found = re.search(messageEntry._regex, resp, re.DOTALL)
 
-                shouldSucceed = roleIndex in activeCheckBoxedRoles
-                succeed = found if shouldSucceed else not found
+                roleChecked = roleIndex in activeCheckBoxedRoles
+                shouldSucceed = not roleChecked if messageEntry.isFailureRegex() else roleChecked 
+                succeeds = found if shouldSucceed else not found
                 
-                # Added logic for Failure Regexes
-                expected = not succeed if messageEntry.isFailureRegex() else succeed
-
-                if not expected:
+                
+                if not succeeds:
                     return False
+
         return True
 
 ##
@@ -1671,7 +1674,9 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
                         # http://meyerweb.com/eric/tools/color-blend/#FFCD81:00CCFF:10:hex
                         sawExpectedResults = messageEntry._roleResults[roleIndex]
                         checkboxChecked = messageEntry._roles[roleIndex]
-                        failureRegexMode = messageEntry.isFailureRegex()
+
+                        # NOTE: currently no way to detect false positive in failure mode
+                        # failureRegexMode = messageEntry.isFailureRegex()
 
                         if sawExpectedResults:
                             # Set Green if success
@@ -1679,7 +1684,7 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
                                 cell.setBackground(Color(0xC8,0xE0,0x51))
                             else:
                                 cell.setBackground(Color(0x87,0xf7,0x17))
-                        elif (checkboxChecked and not failureRegexMode) or (not checkboxChecked and failureRegexMode):
+                        elif checkboxChecked:
                             # Set Blue if its probably a false positive
                             if isSelected:
                                 cell.setBackground(Color(0x8B, 0xCD, 0xBA))
