@@ -90,8 +90,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # For saving/loading config
         self._fc = JFileChooser()        
 
-        # Used by ActionListeners
-        # TODO: can these be removed by instantiating action listeners with variables?
+        # Used by inner classes
         selfExtender = self
         self._selectedColumn = -1
         self._selectedRow = -1
@@ -128,6 +127,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     if e.isPopupTrigger():
                         self.showMenu(e)
                 def showMenu(self, e):
+                    # NOTE: testing if .locked is ok here since its a manual operation
+                    if selfExtender._db.lock.locked():
+                        return
+                    
                     if type(component) is JTableHeader:
                         table = component.getTable()
                         column = component.columnAtPoint(e.getPoint())
@@ -299,22 +302,26 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         # Button pannel
         buttons = JPanel()
-        runButton = JButton("Run", actionPerformed=self.runClick)
-        newUserButton = JButton("New User", actionPerformed=self.getInputUserClick)
-        newRoleButton = JButton("New Role", actionPerformed=self.getInputRoleClick)
+        self._runButton = JButton("Run", actionPerformed=self.runClick)
+        self._cancelButton = JButton("Cancel", actionPerformed=self.cancelClick)
+        self._newUserButton = JButton("New User", actionPerformed=self.getInputUserClick)
+        self._newRoleButton = JButton("New Role", actionPerformed=self.getInputRoleClick)
         #debugButton = JButton("Debug", actionPerformed=self.printDB)
-        newChainButton = JButton("New Chain [Advanced]", actionPerformed=self.newChainClick)
-        saveButton = JButton("Save", actionPerformed=self.saveClick)
-        loadButton = JButton("Load", actionPerformed=self.loadClick)
-        clearButton = JButton("Clear", actionPerformed=self.clearClick)
-        buttons.add(runButton)
-        buttons.add(newUserButton)
-        buttons.add(newRoleButton)
+        self._newChainButton = JButton("New Chain [Advanced]", actionPerformed=self.newChainClick)
+        self._saveButton = JButton("Save", actionPerformed=self.saveClick)
+        self._loadButton = JButton("Load", actionPerformed=self.loadClick)
+        self._clearButton = JButton("Clear", actionPerformed=self.clearClick)
+
+        buttons.add(self._runButton)
+        buttons.add(self._cancelButton)
+        self._cancelButton.setEnabled(False)
+        buttons.add(self._newUserButton)
+        buttons.add(self._newRoleButton)
         #buttons.add(debugButton)
-        buttons.add(newChainButton)
-        buttons.add(saveButton)
-        buttons.add(loadButton)
-        buttons.add(clearButton)
+        buttons.add(self._newChainButton)
+        buttons.add(self._saveButton)
+        buttons.add(self._loadButton)
+        buttons.add(self._clearButton)
 
         # Top pane
         firstPane = JSplitPane(JSplitPane.VERTICAL_SPLIT,roleScrollPane,messageScrollPane)
@@ -443,6 +450,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def newChainClick(self,e):
         self._db.createNewChain()
         self._chainTable.redrawTable()
+
+    def cancelClick(self,e):
+        self._runCancelled = True
 
     def saveClick(self, e):
         # Update original requests with any user changes
@@ -586,9 +596,22 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     ## Methods for running messages and analyzing results
     ##
 
+    def lockButtons(self, running=True):
+        # Disable run button, enable cancel button
+        self._runButton.setEnabled(not running)
+        self._newUserButton.setEnabled(not running)
+        self._newRoleButton.setEnabled(not running)
+        self._newChainButton.setEnabled(not running)
+        self._saveButton.setEnabled(not running)
+        self._loadButton.setEnabled(not running)
+        self._clearButton.setEnabled(not running)
+        self._cancelButton.setEnabled(running)
+
     def runMessagesThread(self, messageIndexes=None):
         self._db.lock.acquire()
         try:
+            self.lockButtons()
+            self._runCancelled=False
             # Update original requests with any user changes
             self._messageTable.updateMessages()
             self._db.clearAllChainResults()
@@ -601,11 +624,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             for message in self._db.getMessagesInOrderByRow():
                 if message._index in indexes:
                     self.runMessage(message._index)
-            #for index in indexes:
-            #    self.runMessage(index)
+
         except:
             traceback.print_exc(file=self._callbacks.getStderr())
         finally:
+            self.lockButtons(False)
             self._db.lock.release()
             self.colorCodeResults()
 
@@ -707,6 +730,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         requestInfo = self._helpers.analyzeRequest(messageInfo)
         reqBody = messageInfo.getRequest()[requestInfo.getBodyOffset():]
         for userIndex in self._db.getActiveUserIndexes():
+            # Handle cancel button early exit here
+            if self._runCancelled:
+                return
+
+
             userEntry = self._db.arrayOfUsers[userIndex]
             newHeaders = self.getNewHeaders(requestInfo, userEntry._cookies, userEntry._header)
             newBody = self.getNewBody(requestInfo, reqBody, userEntry._postargs)
