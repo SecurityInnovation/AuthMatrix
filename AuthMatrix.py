@@ -60,6 +60,7 @@ from java.awt.event import ActionListener;
 from java.awt.event import ItemListener;
 from java.awt.event import ItemEvent;
 from javax.swing.event import DocumentListener;
+from javax.swing.event import ChangeListener;
 import java.lang;
 
 from org.python.core.util import StringUtil
@@ -288,6 +289,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         # request tabs added to this tab on click in message table
         self._tabs = JTabbedPane()
+        # Add change listener to set currentDisplayedItem
+        class TabChangeListener(ChangeListener):
+            def stateChanged(self, e):
+                if type(e.getSource()) == JTabbedPane and e.getSource().getSelectedIndex()>=0:
+                        selfExtender._currentlyDisplayedItem = e.getSource().getSelectedComponent()._requestResponse
+        self._tabs.addChangeListener(TabChangeListener())
+
 
         # Button pannel
         buttons = JPanel()
@@ -1463,15 +1471,16 @@ class MessageTable(JTable):
                 tabname = str(self.getModel()._db.arrayOfUsers[userIndex]._name)
                 self._extender._tabs.addTab(tabname,self.createRequestTabs(selectedMessage._userRuns[userIndex]))
                 
-        # TODO: do this on a tab change on extender._tabs: I think its needed for sending to repeater and comparer
-        # WEIRD: I think this should make it so that only the original can be sent to places
-        # However, it looks like it is working as expected... ???
-        self._extender._currentlyDisplayedItem = selectedMessage._requestResponse
         JTable.changeSelection(self, row, col, toggle, extend)
         return
 
     def createRequestTabs(self, requestResponse, original=False, index=-1):
-        requestTabs = JTabbedPane()
+        
+        class RequestResponseTabbedPane(JTabbedPane):
+            def __init__(self, requestResponse):
+                self._requestResponse=requestResponse
+
+        requestTabs = RequestResponseTabbedPane(requestResponse)
         requestViewer = self._extender._callbacks.createMessageEditor(self._extender, original)
         responseViewer = self._extender._callbacks.createMessageEditor(self._extender, False)
         requestTabs.addTab("Request", requestViewer.getComponent())
