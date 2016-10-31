@@ -371,8 +371,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             for messageInfo in messages:
                 # saveBuffers is required since modifying the original from its source changes the saved objects, its not a copy
                 # TODO maybe replace with RequestResponseStored?
-                messageIndex = self._db.createNewMessage(self._callbacks.saveBuffersToTempFiles(messageInfo), 
-                    self._helpers.analyzeRequest(messageInfo).getUrl())
+                requestInfo = self._helpers.analyzeRequest(messageInfo)
+                name = str(requestInfo.getMethod()).ljust(8) + requestInfo.getUrl().getPath()
+                messageIndex = self._db.createNewMessage(self._callbacks.saveBuffersToTempFiles(messageInfo), name)
                 #self._messageTable.getModel().addRow(row)
             self._messageTable.redrawTable()
 
@@ -824,7 +825,7 @@ class MatrixDB():
         self.STATIC_USER_TABLE_COLUMN_COUNT = 5
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
-        self.LOAD_TIMEOUT = 3.0
+        self.LOAD_TIMEOUT = 10.0
         self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
         self.AUTHMATRIX_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
         self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
@@ -889,10 +890,10 @@ class MatrixDB():
 
     # Returns the Row of the new message
     # Unlike Users and Roles, allow duplicate messages
-    def createNewMessage(self,messagebuffer,url):
+    def createNewMessage(self,messagebuffer,name):
         self.lock.acquire()
         messageIndex = self.arrayOfMessages.size()
-        self.arrayOfMessages.add(MessageEntry(messageIndex, messageIndex - self.deletedMessageCount, messagebuffer, url.getPath()))
+        self.arrayOfMessages.add(MessageEntry(messageIndex, messageIndex - self.deletedMessageCount, messagebuffer, name))
 
         # Add all existing roles as unchecked
         for roleIndex in self.getActiveRoleIndexes():
@@ -1247,7 +1248,7 @@ class UserTableModel(AbstractTableModel):
         elif columnIndex == 3:
             return "HTTP Header"
         elif columnIndex == 4:
-            return "HTTP Parameter (CSRF)" # Rename and remove CSRF?
+            return "POST Parameter"
         else:
             roleEntry = self._db.getRoleByColumn(columnIndex, 'u')
             if roleEntry:
@@ -1333,15 +1334,15 @@ class UserTable(JTable):
         self.getColumnModel().getColumn(1).setMaxWidth(1000);
 
         # Cookie
-        self.getColumnModel().getColumn(2).setMinWidth(300);
+        self.getColumnModel().getColumn(2).setMinWidth(120);
         self.getColumnModel().getColumn(2).setMaxWidth(1500);
 
         # Header
-        self.getColumnModel().getColumn(3).setMinWidth(150);
+        self.getColumnModel().getColumn(3).setMinWidth(120);
         self.getColumnModel().getColumn(3).setMaxWidth(1500);
 
         # POST args
-        self.getColumnModel().getColumn(4).setMinWidth(150);
+        self.getColumnModel().getColumn(4).setMinWidth(120);
         self.getColumnModel().getColumn(4).setMaxWidth(1500);
 
         self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
