@@ -27,6 +27,7 @@ from burp import IHttpRequestResponse
 from java.awt import Component;
 from java.awt import GridBagLayout;
 from java.awt import GridBagConstraints;
+from java.awt import Dimension;
 from java.io import ObjectOutputStream;
 from java.io import FileOutputStream;
 from java.io import ObjectInputStream;
@@ -48,6 +49,8 @@ from javax.swing import JPopupMenu;
 from javax.swing import JTextField;
 from javax.swing import TransferHandler;
 from javax.swing import DropMode;
+from javax.swing import JSeparator;
+from javax.swing import SwingConstants;
 from java.awt.datatransfer import StringSelection;
 from java.awt.datatransfer import DataFlavor;
 from javax.swing.table import AbstractTableModel;
@@ -306,8 +309,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._cancelButton = JButton("Cancel", actionPerformed=self.cancelClick)
         self._newUserButton = JButton("New User", actionPerformed=self.getInputUserClick)
         self._newRoleButton = JButton("New Role", actionPerformed=self.getInputRoleClick)
-        #debugButton = JButton("Debug", actionPerformed=self.printDB)
-        self._newChainButton = JButton("New Chain [Advanced]", actionPerformed=self.newChainClick)
+        self._newChainButton = JButton("New Chain (Advanced)", actionPerformed=self.newChainClick)
         self._saveButton = JButton("Save", actionPerformed=self.saveClick)
         self._loadButton = JButton("Load", actionPerformed=self.loadClick)
         self._clearButton = JButton("Clear", actionPerformed=self.clearClick)
@@ -315,10 +317,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         buttons.add(self._runButton)
         buttons.add(self._cancelButton)
         self._cancelButton.setEnabled(False)
+        separator1 = JSeparator(SwingConstants.VERTICAL)
+        separator1.setPreferredSize(Dimension(25,0))
+        buttons.add(separator1)
         buttons.add(self._newUserButton)
         buttons.add(self._newRoleButton)
-        #buttons.add(debugButton)
         buttons.add(self._newChainButton)
+        separator2 = JSeparator(SwingConstants.VERTICAL)
+        separator2.setPreferredSize(Dimension(25,0))
+        buttons.add(separator2)
         buttons.add(self._saveButton)
         buttons.add(self._loadButton)
         buttons.add(self._clearButton)
