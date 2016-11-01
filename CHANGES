@@ -1,4 +1,18 @@
+v0.6.2 - 10/31/2016
+
+STATE FILE COMPATIBILITY - v0.5.2 and greater
+
+* Fixed a bug when sending a result RequestResponse to another area of Burp, such as Repeater
+
+* Add "Cancel" button to end runs early
+
+* Increase default run timeout
+
+* Updated UI: Add HTTP verb to default request name, Allow shrinking of unused columns in User Table, Improved locking UI during a run
+
 v0.6.1 - 10/13/2016
+
+STATE FILE COMPATIBILITY - v0.5.2 and greater
 
 * Bug fix with Failure Regex - Image in README now shows correct usage example
 
