@@ -460,6 +460,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
     def cancelClick(self,e):
         self._runCancelled = True
+        self._cancelButton.setEnabled(False)
 
     def saveClick(self, e):
         # Update original requests with any user changes
@@ -613,6 +614,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._loadButton.setEnabled(not running)
         self._clearButton.setEnabled(not running)
         self._cancelButton.setEnabled(running)
+
 
     def runMessagesThread(self, messageIndexes=None):
         self._db.lock.acquire()
