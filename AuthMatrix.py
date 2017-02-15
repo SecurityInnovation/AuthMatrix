@@ -1789,7 +1789,7 @@ class RegexRenderer(JLabel, TableCellRenderer):
 
 class MessageEntry:
 
-    def __init__(self, index, tableRow, requestResponse, name = "", roles = {}, regex = "^HTTP/1\\.1 200 OK", deleted = False, failureRegexMode = False):
+    def __init__(self, index, tableRow, requestResponse, name = "", roles = {}, regex = "^HTTP/1\\.1 200", deleted = False, failureRegexMode = False):
         self._index = index
         self._tableRow = tableRow
         self._requestResponse = requestResponse
