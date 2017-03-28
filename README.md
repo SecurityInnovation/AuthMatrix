@@ -51,14 +51,12 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
 ## Sample AuthMatrix Configuration
 
-![Sample AuthMatrix Configuration]
-(images/img1.png)
+![Sample AuthMatrix Configuration](images/img1.png)
 
 
 ## False Positives Detected (Invalid Session Tokens)
 
-![Invalid Session Tokens]
-(images/img2.png)
+![Invalid Session Tokens](images/img2.png)
 
 # Advanced Usage
 
@@ -72,8 +70,7 @@ __NOTE:__ False positive detection and highlighting may not work in Failure Rege
 
 ## Sample Configuration with Failure Regex Mode
 
-![Sample Configuration with Failure Regex Mode]
-(images/img3.png)
+![Sample Configuration with Failure Regex Mode](images/img3.png)
 
 ## Chains
 
@@ -113,11 +110,9 @@ __Pitchfork Mode:__ The source value is extracted from the response for only one
 
 ## Chains for Advanced CSRF
 
-![Chain for CSRF]
-(images/img5.png)
+![Chain for CSRF](images/img5.png)
 
 ## Chain for New Identifiers (Pitchfork Mode)
 
-![Chain Pitchfork]
-(images/img6.png)
+![Chain Pitchfork](images/img6.png)
 
