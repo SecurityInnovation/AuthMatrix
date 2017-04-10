@@ -71,6 +71,7 @@ from threading import Lock
 from threading import Thread
 import traceback
 import re
+import urllib2
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
     
@@ -663,79 +664,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         finally:
             self.lockButtons(False)
             self._db.lock.release()
-            self.colorCodeResults()
-
-    # Replaces headers/cookies with user's token
-    def getNewHeaders(self, requestInfo, newCookieString, newHeader):
-        headers = requestInfo.getHeaders()
-
-        # Handle Cookies
-        if newCookieString:
-            cookieHeader = "Cookie:"
-            previousCookies = []
-            # NOTE: getHeaders has to be called again here cuz of java references
-            for header in requestInfo.getHeaders():
-                # Find and remove existing cookie header
-                if str(header).startswith(cookieHeader):
-                    previousCookies = str(header)[len(cookieHeader):].replace(" ","").split(";")
-                    headers.remove(header)
-
-            newCookies = newCookieString.replace(" ","").split(";")
-            newCookieVariableNames = []
-            for newCookie in newCookies:
-                # If its a valid cookie
-                equalsToken = newCookie.find("=")
-                if equalsToken >= 0:
-                    newCookieVariableNames.append(newCookie[0:equalsToken+1])
-
-            # Add all the old unchanged cookies
-            for previousCookie in previousCookies:
-                # If its a valid cookie
-                equalsToken = previousCookie.find("=")
-                if equalsToken >= 0:
-                    if previousCookie[0:equalsToken+1] not in newCookieVariableNames:
-                        newCookies.append(previousCookie)
-
-            # Remove whitespace
-            newCookies = [x for x in newCookies if x]
-            headers.add(cookieHeader+" "+"; ".join(newCookies))
-
-        # Handle Custom Header
-        if newHeader:
-            # TODO: Support multiple headers with a newline somehow
-            # Remove previous HTTP Header
-            colon = newHeader.find(":")
-            if colon >= 0:
-                # getHeaders has to be called again here cuz of java references
-                for header in requestInfo.getHeaders():
-                    # If the header already exists, remove it
-                    if str(header).startswith(newHeader[0:colon+1]):
-                        headers.remove(header)
-            headers.add(newHeader)
-
-        return headers
-
-    # Add static CSRF token if available
-    def getNewBody(self, requestInfo, reqBody, postargs):
-        
-        # Kinda hacky, but for now it will add the token as long as there is some content in the post body
-        # Even if its a GET request.  This screws up when original requests have no body though... oh well...
-        # TODO: Currently only handles one token
-        newBody = reqBody
-        if postargs and len(reqBody):
-            delimeter = postargs.find("=")
-            if delimeter >= 0:
-                csrfname = postargs[0:delimeter]
-                csrfvalue = postargs[delimeter+1:]
-                params = requestInfo.getParameters()
-                for param in params:
-                    if str(param.getName())==csrfname:
-                        # Handle CSRF Tokens in Body
-                        if param.getType() == 1:
-                            newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
-                if newBody == reqBody:
-                    newBody = reqBody+StringUtil.toBytes("&"+postargs)
-        return newBody
+            self._messageTable.redrawTable()
 
 
     def runMessage(self, messageIndex):
@@ -769,20 +698,17 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
             userEntry = self._db.arrayOfUsers[userIndex]
-            newHeaders = self.getNewHeaders(requestInfo, userEntry._cookies, userEntry._header)
-            newBody = self.getNewBody(requestInfo, reqBody, userEntry._postargs)
-            # Construct and send a message with the new headers
-            message = self._helpers.buildHttpMessage(newHeaders, newBody)
+            newHeaders = ModifyMessage.getNewHeaders(requestInfo, userEntry._cookies, userEntry._header)
+            newBody = ModifyMessage.getNewBody(requestInfo, reqBody, userEntry._postargs)
 
             # Replace with Chain
             for toRegex, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
-                ## TODO - this has a bug because content-lenght is not updated
-                ## Switch it so that it only affects newbody and then run buildHttpMessage after
-                message = StringUtil.fromBytes(message)
-                match = re.search(toRegex, message, re.DOTALL)
-                if match and len(match.groups()):
-                    message = message[0:match.start(1)]+toValue+message[match.end(1):]
-                message = StringUtil.toBytes(message)
+                newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
+                newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
+
+            # Construct and send a message with the new headers
+            message = self._helpers.buildHttpMessage(newHeaders, newBody)
+
 
             # Run with threading to timeout correctly   
             tempRequestResponse.append(None)         
@@ -829,8 +755,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             expectedResult = self.checkResult(messageEntry, roleIndex, activeCheckBoxedRoles)
             messageEntry.setRoleResultByRoleIndex(roleIndex, expectedResult)
                     
-    def colorCodeResults(self):
-        self._messageTable.redrawTable()
 
     def clearColorResults(self, messageIndexArray = None):
         if not messageIndexArray:
@@ -883,6 +807,109 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     return False
 
         return True
+
+
+##
+## Static methods to modify requests during runs
+##
+class ModifyMessage():
+
+    # Replaces headers/cookies with user's token
+    @staticmethod
+    def getNewHeaders(requestInfo, newCookieString, newHeader):
+        headers = requestInfo.getHeaders()
+
+        # Handle Cookies
+        if newCookieString:
+            cookieHeader = "Cookie:"
+            previousCookies = []
+            # NOTE: getHeaders has to be called again here cuz of java references
+            for header in requestInfo.getHeaders():
+                # Find and remove existing cookie header
+                if str(header).startswith(cookieHeader):
+                    previousCookies = str(header)[len(cookieHeader):].replace(" ","").split(";")
+                    headers.remove(header)
+
+            newCookies = newCookieString.replace(" ","").split(";")
+            newCookieVariableNames = []
+            for newCookie in newCookies:
+                # If its a valid cookie
+                equalsToken = newCookie.find("=")
+                if equalsToken >= 0:
+                    newCookieVariableNames.append(newCookie[0:equalsToken+1])
+
+            # Add all the old unchanged cookies
+            for previousCookie in previousCookies:
+                # If its a valid cookie
+                equalsToken = previousCookie.find("=")
+                if equalsToken >= 0:
+                    if previousCookie[0:equalsToken+1] not in newCookieVariableNames:
+                        newCookies.append(previousCookie)
+
+            # Remove whitespace
+            newCookies = [x for x in newCookies if x]
+            headers.add(cookieHeader+" "+"; ".join(newCookies))
+
+        # Handle Custom Header
+        if newHeader:
+            # TODO: Support multiple headers with a newline somehow
+            # Remove previous HTTP Header
+            colon = newHeader.find(":")
+            if colon >= 0:
+                # getHeaders has to be called again here cuz of java references
+                for header in requestInfo.getHeaders():
+                    # If the header already exists, remove it
+                    if str(header).startswith(newHeader[0:colon+1]):
+                        headers.remove(header)
+            headers.add(newHeader)
+
+        return headers
+
+    # Add static CSRF token if available
+    # TODO Deprecate
+    @staticmethod
+    def getNewBody(requestInfo, reqBody, postargs):
+        
+        # Kinda hacky, but for now it will add the token as long as there is some content in the post body
+        # Even if its a GET request.  This screws up when original requests have no body though... oh well...
+        # TODO: Currently only handles one token
+        newBody = reqBody
+        if postargs and len(reqBody):
+            delimeter = postargs.find("=")
+            if delimeter >= 0:
+                csrfname = postargs[0:delimeter]
+                csrfvalue = postargs[delimeter+1:]
+                params = requestInfo.getParameters()
+                for param in params:
+                    if str(param.getName())==csrfname:
+                        # Handle CSRF Tokens in Body
+                        if param.getType() == 1:
+                            newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
+                if newBody == reqBody:
+                    newBody = reqBody+StringUtil.toBytes("&"+postargs)
+        return newBody
+
+    @staticmethod
+    def chainReplace(toRegex, toValue, toArray):
+        ret = ArrayList()
+        # HACK: URLEncode only the first line (either url path or body)
+        encode = True
+        for to in toArray:
+            match = re.search(toRegex, to, re.DOTALL)
+            if match and len(match.groups()):
+                if encode:
+                    toValueNew = urllib2.quote(toValue)
+                else:
+                    toValueNew = toValue
+                ret.add(to[0:match.start(1)]+toValueNew+to[match.end(1):])
+            else:
+                ret.add(to)
+            encode=False
+        return ret
+
+
+
+
 
 ##
 ## DB Class that holds all configuration data
