@@ -85,7 +85,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.6.2")
+        callbacks.setExtensionName("AuthMatrix - v0.6.3")
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -399,6 +399,21 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 #self._messageTable.getModel().addRow(row)
             self._messageTable.redrawTable()
 
+        class UserCookiesActionListener(ActionListener):
+            def __init__(self, currentUser, extender):
+                self.currentUser=currentUser
+                self.extender = extender
+
+            def actionPerformed(self, e):
+                for messageInfo in messages:
+                    requestInfo = self.extender._helpers.analyzeRequest(messageInfo)
+                    for header in requestInfo.getHeaders():
+                        cookieStr = "Cookie: "
+                        if header.startswith(cookieStr):
+                            cookieVal = header[len(cookieStr):]
+                            self.currentUser._cookies = cookieVal
+                self.extender._userTable.redrawTable()
+
         ret = []
         messages = invocation.getSelectedMessages()
 
@@ -413,6 +428,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             menuItem = JMenuItem("Send request(s) to AuthMatrix");
             menuItem.addActionListener(addRequestsToTab)
             ret.append(menuItem)
+
+            if len(messages)==1:
+                # Send cookies to user:
+                for i in self._db.getActiveUserIndexes():
+                    user = self._db.arrayOfUsers[i]
+                    menuItem = JMenuItem("Send cookies to AuthMatrix user: "+user._name);
+                    menuItem.addActionListener(UserCookiesActionListener(user, self))
+                    ret.append(menuItem)
+
         return ret
     
     ##
@@ -674,7 +698,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
             # Remove whitespace
             newCookies = [x for x in newCookies if x]
-            headers.add(cookieHeader+" "+";".join(newCookies))
+            headers.add(cookieHeader+" "+"; ".join(newCookies))
 
         # Handle Custom Header
         if newHeader:
@@ -752,6 +776,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
             # Replace with Chain
             for toRegex, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
+                ## TODO - this has a bug because content-lenght is not updated
+                ## Switch it so that it only affects newbody and then run buildHttpMessage after
                 message = StringUtil.fromBytes(message)
                 match = re.search(toRegex, message, re.DOTALL)
                 if match and len(match.groups()):
