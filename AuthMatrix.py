@@ -73,6 +73,8 @@ import traceback
 import re
 import urllib2
 import json
+import base64
+
 
 AUTHMATRIX_VERSION = "0.6.3"
 
@@ -1129,8 +1131,8 @@ class MatrixDB():
         self.lock.release()
 
     def loadJson(self, jsonText, extender):
-        # TODO: Weird issue where saving serialized json doesn't case-correct it
-        # This might have weird results though
+        # TODO: Weird issue where saving serialized json doesn't use correct capitalization on bools
+        # This replacement might have weird results, but most are mitigated by using base64 encoding
         jsonFixed = jsonText.replace(": False",": false").replace(": True",": true")
 
         stateDict = json.loads(jsonFixed)
@@ -1160,9 +1162,9 @@ class MatrixDB():
                 userEntry["name"],
                 {int(x): userEntry["roles"][x] for x in userEntry["roles"].keys()}, # convert keys to ints
                 userEntry["deleted"],
-                userEntry["cookies"],
-                userEntry["header"],
-                userEntry["postargs"]))
+                base64.b64decode(userEntry["cookiesBase64"]),
+                base64.b64decode(userEntry["headerBase64"]),
+                base64.b64decode(userEntry["postargsBase64"])))
 
         # TODO chainResults?
         
@@ -1175,14 +1177,14 @@ class MatrixDB():
                     messageEntry["host"],
                     messageEntry["port"],
                     messageEntry["protocol"],
-                    StringUtil.toBytes(messageEntry["request"])),
+                    StringUtil.toBytes(base64.b64decode(messageEntry["requestBase64"]))),
                 messageEntry["name"], 
                 {int(x): messageEntry["roles"][x] for x in messageEntry["roles"].keys()}, # convert keys to ints
-                messageEntry["regex"], 
+                base64.b64decode(messageEntry["regexBase64"]), 
                 messageEntry["deleted"], 
                 messageEntry["failureRegexMode"]))
 
-        # TODO roleResults and potentially userRuns
+        # TODO roleResults (need to convert keys) and potentially userRuns
 
         for chainEntry in stateDict["arrayOfChains"]:
             self.arrayOfChains.add(ChainEntry(
@@ -1190,9 +1192,9 @@ class MatrixDB():
                 chainEntry["tableRow"],
                 chainEntry["name"],
                 chainEntry["fromID"],
-                chainEntry["fromRegex"],
+                base64.b64decode(chainEntry["fromRegexBase64"]),
                 chainEntry["toID"],
-                chainEntry["toRegex"],
+                base64.b64decode(chainEntry["toRegexBase64"]),
                 chainEntry["deleted"],
                 chainEntry["sourceUser"],
                 chainEntry["enabled"]
@@ -1229,9 +1231,9 @@ class MatrixDB():
                     "roles":userEntry._roles,
                     "deleted":userEntry._deleted,
                     "tableRow":userEntry._tableRow,
-                    "cookies":userEntry._cookies,
-                    "header":userEntry._header,
-                    "postargs":userEntry._postargs,
+                    "cookiesBase64":base64.b64encode(userEntry._cookies),
+                    "headerBase64":base64.b64encode(userEntry._header),
+                    "postargsBase64":base64.b64encode(userEntry._postargs),
                     "chainResults":userEntry._chainResults
                 })
 
@@ -1240,17 +1242,17 @@ class MatrixDB():
             stateDict["arrayOfMessages"].append({
                     "index":messageEntry._index, 
                     "tableRow":messageEntry._tableRow,
-                    "request":StringUtil.fromBytes(messageEntry._requestResponse.getRequest()), # TODO Base64
+                    "requestBase64":base64.b64encode(StringUtil.fromBytes(messageEntry._requestResponse.getRequest())),
                     "host":messageEntry._requestResponse.getHttpService().getHost(),
                     "port":messageEntry._requestResponse.getHttpService().getPort(),
                     "protocol":messageEntry._requestResponse.getHttpService().getProtocol(),
                     "name":messageEntry._name, 
                     "roles":messageEntry._roles, 
-                    "regex":messageEntry._regex, 
+                    "regexBase64":base64.b64encode(messageEntry._regex), 
                     "deleted":messageEntry._deleted,
                     "failureRegexMode":messageEntry._failureRegexMode,
                     #"userRuns":messageEntry._userRuns,
-                    "roleResults":messageEntry._roleResults
+                    "RunResultForRoleID":messageEntry._roleResults
                 })
 
         stateDict["arrayOfChains"] = []
@@ -1258,9 +1260,9 @@ class MatrixDB():
             stateDict["arrayOfChains"].append({
                     "index":chainEntry._index,
                     "fromID":chainEntry._fromID,
-                    "fromRegex":chainEntry._fromRegex,
+                    "fromRegexBase64":base64.b64encode(chainEntry._fromRegex),
                     "toID":chainEntry._toID,
-                    "toRegex":chainEntry._toRegex,
+                    "toRegexBase64":base64.b64encode(chainEntry._toRegex),
                     "deleted":chainEntry._deleted,
                     "tableRow":chainEntry._tableRow,
                     "name":chainEntry._name,
@@ -1272,7 +1274,7 @@ class MatrixDB():
                     "toEnd":chainEntry._toEnd
                 })
 
-        # BUG this is not case correcting booleans for some reason
+        # BUG: this is not using the correct capitalization on booleans for some reason
         return json.dumps(stateDict)
 
     def getActiveUserIndexes(self):
