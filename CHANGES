@@ -2,7 +2,11 @@ v0.6.3 - 04/15/2017
 
 STATE FILE COMPATIBILITY - v0.5.2 and greater
 
+* Updated Serialization format to JSON.  Loading legacy state files is still supported for now, however, all new state files will be saved to the new format.
+
 * New context options for sending cookies to users
+
+* Fixed bug in chaining where content-length wouldn't update appropriately
 
 v0.6.2 - 10/31/2016
 

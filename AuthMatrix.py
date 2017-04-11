@@ -72,6 +72,9 @@ from threading import Thread
 import traceback
 import re
 import urllib2
+import json
+
+AUTHMATRIX_VERSION = "0.6.3"
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
     
@@ -86,7 +89,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.6.3")
+        callbacks.setExtensionName("AuthMatrix - v"+AUTHMATRIX_VERSION)
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -499,9 +502,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if result != JOptionPane.YES_OPTION:
                     return
             fileName = f.getPath()
-            outs = ObjectOutputStream(FileOutputStream(fileName))
-            outs.writeObject(self._db.getSaveableObject())
-            outs.close()
+            fileout = open(fileName,'w')
+            fileout.write(self._db.getSaveableJson())
+            fileout.close()
 
     def loadClick(self,e):
         returnVal = self._fc.showOpenDialog(self._splitpane)
@@ -521,11 +524,18 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             f = self._fc.getSelectedFile()
             fileName = f.getPath()
             
-            ins = ObjectInputStream(FileInputStream(fileName))
-            dbData=ins.readObject()
-            ins.close()
+            filein = open(fileName,'r')
+            json = filein.read()
+            filein.close()
+            # Check if using on older state file compatible with v0.5.2 or greater
+            if not json or json[0] !="{":
+                ins = ObjectInputStream(FileInputStream(fileName))
+                dbData=ins.readObject()
+                ins.close()
+                self._db.loadLegacy(dbData,self)
+            else:
+                self._db.loadJson(json,self)
 
-            self._db.load(dbData,self)
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
             self._chainTable.redrawTable()
@@ -924,8 +934,6 @@ class MatrixDB():
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
         self.LOAD_TIMEOUT = 10.0
-        self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
-        self.AUTHMATRIX_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
         self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
 
         self.lock = Lock()
@@ -937,6 +945,7 @@ class MatrixDB():
         self.deletedRoleCount = 0
         self.deletedMessageCount = 0
         self.deletedChainCount = 0
+
 
     # Returns the index of the user, whether its new or not
     def getOrCreateUser(self, name):
@@ -1031,7 +1040,10 @@ class MatrixDB():
         self.deletedArrayCount = 0
         self.lock.release()
 
-    def load(self, db, extender):
+    def loadLegacy(self, db, extender):
+        FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
+        AUTHMATRIX_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
+
         self.lock.acquire()
         self.arrayOfUsers = ArrayList()
         self.arrayOfRoles = ArrayList()
@@ -1044,8 +1056,8 @@ class MatrixDB():
 
 
         for message in db.arrayOfMessages:
-            if message._successRegex.startswith(self.FAILURE_REGEX_SERIALIZE_CODE):
-                regex = message._successRegex[len(self.FAILURE_REGEX_SERIALIZE_CODE):]
+            if message._successRegex.startswith(FAILURE_REGEX_SERIALIZE_CODE):
+                regex = message._successRegex[len(FAILURE_REGEX_SERIALIZE_CODE):]
                 failureRegexMode=True
             else:
                 regex = message._successRegex
@@ -1073,16 +1085,16 @@ class MatrixDB():
                 name=""
                 sourceUser=""
                 if user._name:
-                    namesplit = user._name.split(self.AUTHMATRIX_SERIALIZE_CODE)
+                    namesplit = user._name.split(AUTHMATRIX_SERIALIZE_CODE)
                     name=namesplit[0]
                     if len(namesplit)>1:
                         sourceUser=namesplit[1]
 
-                token = user._token.split(self.AUTHMATRIX_SERIALIZE_CODE)
+                token = user._token.split(AUTHMATRIX_SERIALIZE_CODE)
                 assert(len(token)==2)
                 fromID = token[0]
                 fromRegex = token[1]
-                staticcsrf = user._staticcsrf.split(self.AUTHMATRIX_SERIALIZE_CODE)
+                staticcsrf = user._staticcsrf.split(AUTHMATRIX_SERIALIZE_CODE)
                 assert(len(staticcsrf)==2)
                 toID = staticcsrf[0]
                 toRegex = staticcsrf[1]
@@ -1099,7 +1111,7 @@ class MatrixDB():
                     ))
             else: 
                 # Normal User
-                token = [""] if not user._token else user._token.split(self.AUTHMATRIX_SERIALIZE_CODE)
+                token = [""] if not user._token else user._token.split(AUTHMATRIX_SERIALIZE_CODE)
                 cookies = token[0]
                 header = "" if len(token)==1 else token[1]
                 name = "" if not user._name else user._name
@@ -1116,73 +1128,152 @@ class MatrixDB():
 
         self.lock.release()
 
-    
+    def loadJson(self, jsonText, extender):
+        # TODO: Weird issue where saving serialized json doesn't case-correct it
+        # This might have weird results though
+        jsonFixed = jsonText.replace(": False",": false").replace(": True",": true")
 
-    def getSaveableObject(self):
-        # NOTE: might not need locks?
+        stateDict = json.loads(jsonFixed)
+
         self.lock.acquire()
-        serializedMessages = []
-        serializedRoles = []
-        serializedUsers = []
-        for message in self.arrayOfMessages:
-            regex = self.FAILURE_REGEX_SERIALIZE_CODE+message._regex if message.isFailureRegex() else message._regex
-            serializedMessages.append(MessageEntryData(
-                message._index, 
-                message._tableRow,
-                message._requestResponse.getRequest(), 
-                message._requestResponse.getHttpService().getHost(),
-                message._requestResponse.getHttpService().getPort(),
-                message._requestResponse.getHttpService().getProtocol(),
-                message._name, message._roles, regex, message._deleted))
-        for role in self.arrayOfRoles:
-            serializedRoles.append(RoleEntryData(
-                role._index,
-                role._column+3, # NOTE this is done to preserve compatability with older state files
-                role._column+3, # NOTE this is done to preserve compatability with older state files
-                role._name,
-                role._deleted))
-        for user in self.arrayOfUsers:
-            cookies = user._cookies if user._cookies else ""
-            header = user._header if user._header else ""
-            name = user._name if user._name else ""
-            postargs = user._postargs if user._postargs else ""
-            token = cookies + self.AUTHMATRIX_SERIALIZE_CODE + header
-            serializedUsers.append(UserEntryData(
-                user._index,
-                user._tableRow,
-                name,
-                user._roles,
-                user._deleted,
-                token,
-                postargs))
-        # NOTE to preserve backwords compatability, chains are stored in UserEntries in a really hacky way
-        for chain in self.arrayOfChains:
-            name = chain._name if chain._name else ""
-            nameAndSourceUser = name if not chain._sourceUser else name+self.AUTHMATRIX_SERIALIZE_CODE+chain._sourceUser
-            fromID = chain._fromID if chain._fromID else ""
-            fromRegex = chain._fromRegex if chain._fromRegex else ""
-            toID = chain._toID if chain._toID else ""
-            toRegex = chain._toRegex if chain._toRegex else ""
-            serializedUsers.append(UserEntryData(
-                chain._index,
-                chain._tableRow,
-                nameAndSourceUser,
-                self.deletedChainCount,
-                chain._deleted,
-                fromID+self.AUTHMATRIX_SERIALIZE_CODE+fromRegex,
-                toID+self.AUTHMATRIX_SERIALIZE_CODE+toRegex
-                ))
+        self.arrayOfUsers = ArrayList()
+        self.arrayOfRoles = ArrayList()
+        self.arrayOfMessages = ArrayList()
+        self.arrayOfChains = ArrayList()
+        self.deletedUserCount = stateDict["deletedUserCount"]
+        self.deletedRoleCount = stateDict["deletedRoleCount"]
+        self.deletedMessageCount = stateDict["deletedMessageCount"]
+        self.deletedChainCount = stateDict["deletedChainCount"]
 
-        ret = MatrixDBData(
-            serializedMessages,
-            serializedRoles,
-            serializedUsers,
-            self.deletedUserCount,
-            self.deletedRoleCount,
-            self.deletedMessageCount)
+        for roleEntry in stateDict["arrayOfRoles"]:
+            self.arrayOfRoles.add(RoleEntry(
+                roleEntry["index"],
+                roleEntry["column"],
+                roleEntry["name"],
+                roleEntry["deleted"]))
+
+
+        for userEntry in stateDict["arrayOfUsers"]:
+            self.arrayOfUsers.add(UserEntry(
+                userEntry["index"],
+                userEntry["tableRow"],
+                userEntry["name"],
+                {int(x): userEntry["roles"][x] for x in userEntry["roles"].keys()}, # convert keys to ints
+                userEntry["deleted"],
+                userEntry["cookies"],
+                userEntry["header"],
+                userEntry["postargs"]))
+
+        # TODO chainResults?
+        
+        for messageEntry in stateDict["arrayOfMessages"]:
+            self.arrayOfMessages.add(MessageEntry(
+                messageEntry["index"],
+                messageEntry["tableRow"],
+                RequestResponseStored(
+                    extender,
+                    messageEntry["host"],
+                    messageEntry["port"],
+                    messageEntry["protocol"],
+                    StringUtil.toBytes(messageEntry["request"])),
+                messageEntry["name"], 
+                {int(x): messageEntry["roles"][x] for x in messageEntry["roles"].keys()}, # convert keys to ints
+                messageEntry["regex"], 
+                messageEntry["deleted"], 
+                messageEntry["failureRegexMode"]))
+
+        # TODO roleResults and potentially userRuns
+
+        for chainEntry in stateDict["arrayOfChains"]:
+            self.arrayOfChains.add(ChainEntry(
+                chainEntry["index"],
+                chainEntry["tableRow"],
+                chainEntry["name"],
+                chainEntry["fromID"],
+                chainEntry["fromRegex"],
+                chainEntry["toID"],
+                chainEntry["toRegex"],
+                chainEntry["deleted"],
+                chainEntry["sourceUser"],
+                chainEntry["enabled"]
+                ))
+        
+        # TODO fromStart, fromEnd, toStart, toEnd?
 
         self.lock.release()
-        return ret
+
+
+
+    def getSaveableJson(self):
+
+        stateDict = {"version":AUTHMATRIX_VERSION,
+        "deletedUserCount":self.deletedUserCount,
+        "deletedRoleCount":self.deletedRoleCount,
+        "deletedMessageCount":self.deletedMessageCount,
+        "deletedChainCount":self.deletedChainCount}
+
+        stateDict["arrayOfRoles"] = []
+        for roleEntry in self.arrayOfRoles:
+            stateDict["arrayOfRoles"].append({
+                    "index":roleEntry._index,
+                    "name":roleEntry._name,
+                    "deleted":roleEntry._deleted,
+                    "column":roleEntry._column
+                })
+
+        stateDict["arrayOfUsers"] = []
+        for userEntry in self.arrayOfUsers:
+            stateDict["arrayOfUsers"].append({
+                    "index":userEntry._index,
+                    "name":userEntry._name,
+                    "roles":userEntry._roles,
+                    "deleted":userEntry._deleted,
+                    "tableRow":userEntry._tableRow,
+                    "cookies":userEntry._cookies,
+                    "header":userEntry._header,
+                    "postargs":userEntry._postargs,
+                    "chainResults":userEntry._chainResults
+                })
+
+        stateDict["arrayOfMessages"] = []
+        for messageEntry in self.arrayOfMessages:
+            stateDict["arrayOfMessages"].append({
+                    "index":messageEntry._index, 
+                    "tableRow":messageEntry._tableRow,
+                    "request":StringUtil.fromBytes(messageEntry._requestResponse.getRequest()), # TODO Base64
+                    "host":messageEntry._requestResponse.getHttpService().getHost(),
+                    "port":messageEntry._requestResponse.getHttpService().getPort(),
+                    "protocol":messageEntry._requestResponse.getHttpService().getProtocol(),
+                    "name":messageEntry._name, 
+                    "roles":messageEntry._roles, 
+                    "regex":messageEntry._regex, 
+                    "deleted":messageEntry._deleted,
+                    "failureRegexMode":messageEntry._failureRegexMode,
+                    #"userRuns":messageEntry._userRuns,
+                    "roleResults":messageEntry._roleResults
+                })
+
+        stateDict["arrayOfChains"] = []
+        for chainEntry in self.arrayOfChains:
+            stateDict["arrayOfChains"].append({
+                    "index":chainEntry._index,
+                    "fromID":chainEntry._fromID,
+                    "fromRegex":chainEntry._fromRegex,
+                    "toID":chainEntry._toID,
+                    "toRegex":chainEntry._toRegex,
+                    "deleted":chainEntry._deleted,
+                    "tableRow":chainEntry._tableRow,
+                    "name":chainEntry._name,
+                    "sourceUser":chainEntry._sourceUser,
+                    "enabled":chainEntry._enabled,
+                    "fromStart":chainEntry._fromStart,
+                    "fromEnd":chainEntry._fromEnd,
+                    "toStart":chainEntry._toStart,
+                    "toEnd":chainEntry._toEnd
+                })
+
+        # BUG this is not case correcting booleans for some reason
+        return json.dumps(stateDict)
 
     def getActiveUserIndexes(self):
         return [x._index for x in self.arrayOfUsers if not x.isDeleted()]
@@ -2038,65 +2129,6 @@ class ChainEntry:
 
 
 ##
-## SERIALIZABLE CLASSES
-##
-
-# Serializable DB
-# Used to store Database to Disk on Save and Load
-class MatrixDBData():
-
-    def __init__(self, arrayOfMessages, arrayOfRoles, arrayOfUsers, deletedUserCount, deletedRoleCount, deletedMessageCount):
-        
-        self.arrayOfMessages = arrayOfMessages
-        self.arrayOfRoles = arrayOfRoles
-        self.arrayOfUsers = arrayOfUsers
-        self.deletedUserCount = deletedUserCount
-        self.deletedRoleCount = deletedRoleCount
-        self.deletedMessageCount = deletedMessageCount
-
-# Serializable MessageEntry
-# Used since the Burp RequestResponse object can not be serialized
-class MessageEntryData:
-
-    def __init__(self, index, tableRow, requestData, host, port, protocol, name, roles, successRegex, deleted):
-        self._index = index
-        self._tableRow = tableRow
-        self._requestData = requestData
-        self._host = host
-        self._port = port
-        self._protocol = protocol
-        self._url = "" # NOTE obsolete, kept for backwords compatability
-        self._name = name
-        self._roles = roles
-        # NOTE: to preserve backwords compatability, successregex will have a specific prefix "|AMFAILURE|" to indicate FailureRegexMode
-        self._successRegex = successRegex
-        self._deleted = deleted
-        return
-
-class RoleEntryData:
-
-    def __init__(self,index,mTableColumnIndex,uTableColumnIndex,name,deleted):
-        self._index = index
-        self._name = name
-        self._deleted = deleted
-        # NOTE: to preserve backwords compatibility, these will be the dynamic column +3
-        self._mTableColumn = mTableColumnIndex
-        self._uTableColumn = uTableColumnIndex
-        return
-
-class UserEntryData:
-
-    def __init__(self, index, tableRow, name, roles, deleted, token, staticcsrf):
-        self._index = index
-        self._name = name
-        self._roles = roles
-        self._deleted = deleted
-        self._tableRow = tableRow
-        self._token = token
-        self._staticcsrf = staticcsrf
-        return
-
-##
 ## RequestResponse Implementation
 ##
 
@@ -2202,6 +2234,67 @@ class MessageTableRowTransferHandler(TransferHandler):
         #print "Moving row "+str(rowFrom)+" to row "+str(index)
         self._table.getModel()._db.moveMessageToRow(int(rowFrom), int(index))
         return True
+
+
+
+##
+## LEGACY SERIALIZABLE CLASSES
+##
+
+# Serializable DB
+# Used to store Database to Disk on Save and Load
+class MatrixDBData():
+
+    def __init__(self, arrayOfMessages, arrayOfRoles, arrayOfUsers, deletedUserCount, deletedRoleCount, deletedMessageCount):
+        
+        self.arrayOfMessages = arrayOfMessages
+        self.arrayOfRoles = arrayOfRoles
+        self.arrayOfUsers = arrayOfUsers
+        self.deletedUserCount = deletedUserCount
+        self.deletedRoleCount = deletedRoleCount
+        self.deletedMessageCount = deletedMessageCount
+
+# Serializable MessageEntry
+# Used since the Burp RequestResponse object can not be serialized
+class MessageEntryData:
+
+    def __init__(self, index, tableRow, requestData, host, port, protocol, name, roles, successRegex, deleted):
+        self._index = index
+        self._tableRow = tableRow
+        self._requestData = requestData
+        self._host = host
+        self._port = port
+        self._protocol = protocol
+        self._url = "" # NOTE obsolete, kept for backwords compatability
+        self._name = name
+        self._roles = roles
+        # NOTE: to preserve backwords compatability, successregex will have a specific prefix "|AMFAILURE|" to indicate FailureRegexMode
+        self._successRegex = successRegex
+        self._deleted = deleted
+        return
+
+class RoleEntryData:
+
+    def __init__(self,index,mTableColumnIndex,uTableColumnIndex,name,deleted):
+        self._index = index
+        self._name = name
+        self._deleted = deleted
+        # NOTE: to preserve backwords compatibility, these will be the dynamic column +3
+        self._mTableColumn = mTableColumnIndex
+        self._uTableColumn = uTableColumnIndex
+        return
+
+class UserEntryData:
+
+    def __init__(self, index, tableRow, name, roles, deleted, token, staticcsrf):
+        self._index = index
+        self._name = name
+        self._roles = roles
+        self._deleted = deleted
+        self._tableRow = tableRow
+        self._token = token
+        self._staticcsrf = staticcsrf
+        return
 
 
 
