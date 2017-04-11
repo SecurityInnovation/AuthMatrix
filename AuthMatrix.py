@@ -28,10 +28,6 @@ from java.awt import Component;
 from java.awt import GridBagLayout;
 from java.awt import GridBagConstraints;
 from java.awt import Dimension;
-from java.io import ObjectOutputStream;
-from java.io import FileOutputStream;
-from java.io import ObjectInputStream;
-from java.io import FileInputStream;
 from java.util import ArrayList;
 from java.lang import Boolean;
 from javax.swing import JScrollPane;
@@ -527,16 +523,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             fileName = f.getPath()
             
             filein = open(fileName,'r')
-            json = filein.read()
+            jsonText = filein.read()
             filein.close()
             # Check if using on older state file compatible with v0.5.2 or greater
-            if not json or json[0] !="{":
-                ins = ObjectInputStream(FileInputStream(fileName))
-                dbData=ins.readObject()
-                ins.close()
-                self._db.loadLegacy(dbData,self)
+            if not jsonText or jsonText[0] !="{":
+                self._db.loadLegacy(fileName,self)
             else:
-                self._db.loadJson(json,self)
+                self._db.loadJson(jsonText,self)
 
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
@@ -1042,9 +1035,18 @@ class MatrixDB():
         self.deletedArrayCount = 0
         self.lock.release()
 
-    def loadLegacy(self, db, extender):
+    def loadLegacy(self, fileName, extender):
+        from java.io import ObjectOutputStream;
+        from java.io import FileOutputStream;
+        from java.io import ObjectInputStream;
+        from java.io import FileInputStream;
+
         FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
         AUTHMATRIX_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
+
+        ins = ObjectInputStream(FileInputStream(fileName))
+        db=ins.readObject()
+        ins.close()
 
         self.lock.acquire()
         self.arrayOfUsers = ArrayList()
@@ -1274,7 +1276,7 @@ class MatrixDB():
                     "toEnd":chainEntry._toEnd
                 })
 
-        # BUG: this is not using the correct capitalization on booleans for some reason
+        # BUG: this is not using the correct capitalization on booleans after loading legacy states
         return json.dumps(stateDict)
 
     def getActiveUserIndexes(self):
@@ -2297,6 +2299,3 @@ class UserEntryData:
         self._token = token
         self._staticcsrf = staticcsrf
         return
-
-
-
