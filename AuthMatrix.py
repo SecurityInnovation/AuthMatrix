@@ -223,10 +223,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._messageTable.redrawTable()
 
         class actionChangeDomain(ActionListener):
-            def replaceDomain(self, requestData, oldDomain, newDomain):
-                reqstr = StringUtil.fromBytes(requestData)
-                reqstr = reqstr.replace("Host: "+oldDomain, "Host: "+newDomain)
-                newreq = StringUtil.toBytes(reqstr)
+            def replaceDomain(self, requestResponse, newDomain):
+                requestInfo = selfExtender._helpers.analyzeRequest(requestResponse)
+                reqBody = requestResponse.getRequest()[requestInfo.getBodyOffset():]            
+                newHeaders = ModifyMessage.getNewHeaders(requestInfo, None, "Host: "+newDomain)
+                newreq = selfExtender._helpers.buildHttpMessage(newHeaders, reqBody)
                 return newreq
 
             def actionPerformed(self,e):
@@ -238,13 +239,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
                     service = None if len(messages)>1 else messages[0]._requestResponse.getHttpService()
 
-                    ok, host, port, tls = selfExtender.changeDomainPopup(service)
+                    ok, host, port, tls, replaceHost = selfExtender.changeDomainPopup(service)
                     if ok and host:
                         if not port or not port.isdigit():
                             port = 443 if tls else 80
                         for m in messages:
-                            # TODO is replacing the host header appropriate here?
-                            request = self.replaceDomain(m._requestResponse.getRequest(), m._requestResponse.getHttpService().getHost(), host)
+                            if replaceHost:
+                                request = self.replaceDomain(m._requestResponse, host)
+                            else:
+                                request = m._requestResponse.getRequest()
                             m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request)
                             m.clearResults()
                     selfExtender._selectedColumn = -1
@@ -553,6 +556,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         hostField = JTextField(25)
         portField = JTextField(25)
         checkbox = JCheckBox()
+
+        replaceHostCheckbox = JCheckBox()
+        replaceHostCheckbox.setSelected(True)
+        
         errorField = JLabel("\n")
         errorField.setForeground(Color.orange);
         errorField.setFont
@@ -610,7 +617,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         fourthline.add(checkbox)
         fourthline.add(JLabel("Use HTTPS"))
         fifthline = JPanel()
-        fifthline.add(errorField)
+        fifthline.add(replaceHostCheckbox)
+        fifthline.add(JLabel("Replace Host in HTTP header"))
+        sixthline = JPanel()
+        sixthline.add(errorField)
 
         gbc.gridy = 0
         domainPanel.add(firstline,gbc)
@@ -622,13 +632,16 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         domainPanel.add(fourthline, gbc)
         gbc.gridy = 4
         domainPanel.add(fifthline, gbc)
+        gbc.gridy = 5
+        domainPanel.add(sixthline, gbc)
+
 
         result = JOptionPane.showConfirmDialog(
             self._splitpane,domainPanel, "Configure target details", JOptionPane.OK_CANCEL_OPTION)
         cancelled = (result == JOptionPane.CANCEL_OPTION)
         if cancelled or not isValidDomain(hostField.getText()):
             return (False, None, None, False)
-        return (True, hostField.getText(), portField.getText(), checkbox.isSelected())
+        return (True, hostField.getText(), portField.getText(), checkbox.isSelected(), replaceHostCheckbox.isSelected())
 
     ##
     ## Methods for running messages and analyzing results
@@ -822,18 +835,20 @@ class ModifyMessage():
     # Replaces headers/cookies with user's token
     @staticmethod
     def getNewHeaders(requestInfo, newCookieString, newHeader):
+        ret = requestInfo.getHeaders()
         headers = requestInfo.getHeaders()
 
         # Handle Cookies
         if newCookieString:
+            replaceIndex = -1
             cookieHeader = "Cookie:"
             previousCookies = []
-            # NOTE: getHeaders has to be called again here cuz of java references
-            for header in requestInfo.getHeaders():
-                # Find and remove existing cookie header
+            for i in range(headers.size()):
+                header = headers[i]
+                # Find existing cookie header
                 if str(header).startswith(cookieHeader):
                     previousCookies = str(header)[len(cookieHeader):].replace(" ","").split(";")
-                    headers.remove(header)
+                    replaceIndex = i
 
             newCookies = newCookieString.replace(" ","").split(";")
             newCookieVariableNames = []
@@ -853,22 +868,29 @@ class ModifyMessage():
 
             # Remove whitespace
             newCookies = [x for x in newCookies if x]
-            headers.add(cookieHeader+" "+"; ".join(newCookies))
+            newCookiesHeader = cookieHeader+" "+"; ".join(newCookies)
+            if replaceIndex >= 0:
+                ret.set(replaceIndex, newCookiesHeader)
+            else:
+                ret.add(newCookiesHeader)
 
         # Handle Custom Header
         if newHeader:
+            replaceIndex = -1
             # TODO: Support multiple headers with a newline somehow
-            # Remove previous HTTP Header
             colon = newHeader.find(":")
             if colon >= 0:
-                # getHeaders has to be called again here cuz of java references
-                for header in requestInfo.getHeaders():
+                for i in range(headers.size()):
+                    header = headers[i]
                     # If the header already exists, remove it
                     if str(header).startswith(newHeader[0:colon+1]):
-                        headers.remove(header)
-            headers.add(newHeader)
+                        replaceIndex = i
+            if replaceIndex >= 0:
+                ret.set(replaceIndex, newHeader)
+            else:
+                ret.add(newHeader)
 
-        return headers
+        return ret
 
     # Add static CSRF token if available
     # TODO Deprecate
