@@ -968,9 +968,9 @@ class ModifyMessage():
             toNew = to
             if customPrefix in to:
                 if customPrefix+"RANDOM}" in to:
-                    # This will produce a random 16 char alpha string
+                    # This will produce a random 4 char numeric string
                     # Most common use case is for APIs that reject requests that are identical to a previous request
-                    randomString = ''.join(random.choice(string.ascii_uppercase) for _ in range(16))
+                    randomString = ''.join(random.choice(string.digits) for _ in range(4))
                     toNew = to.replace(customPrefix+"RANDOM}",randomString)
             ret.add(toNew)
 
