@@ -70,6 +70,8 @@ import re
 import urllib2
 import json
 import base64
+import random
+import string
 
 
 AUTHMATRIX_VERSION = "0.6.3"
@@ -724,6 +726,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
                 newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
 
+            # Replace Custom Special Types (i.e. Random)
+            newBody = StringUtil.toBytes(ModifyMessage.customReplace([StringUtil.fromBytes(newBody)])[0])
+            newHeaders = ModifyMessage.customReplace(newHeaders)
+
             # Construct and send a message with the new headers
             message = self._helpers.buildHttpMessage(newHeaders, newBody)
 
@@ -934,6 +940,22 @@ class ModifyMessage():
             encode=False
         return ret
 
+    ## Method to replace custom special types in messages
+    @staticmethod
+    def customReplace(toArray):
+        ret = ArrayList()
+        customPrefix = "#{AUTHMATRIX:"
+        for to in toArray:
+            toNew = to
+            if customPrefix in to:
+                if customPrefix+"RANDOM}" in to:
+                    # This will produce a random 16 char alpha string
+                    # Most common use case is for APIs that reject requests that are identical to a previous request
+                    randomString = ''.join(random.choice(string.ascii_uppercase) for _ in range(16))
+                    toNew = to.replace(customPrefix+"RANDOM}",randomString)
+            ret.add(toNew)
+
+        return ret
 
 
 
