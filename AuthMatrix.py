@@ -28,10 +28,6 @@ from java.awt import Component;
 from java.awt import GridBagLayout;
 from java.awt import GridBagConstraints;
 from java.awt import Dimension;
-from java.io import ObjectOutputStream;
-from java.io import FileOutputStream;
-from java.io import ObjectInputStream;
-from java.io import FileInputStream;
 from java.util import ArrayList;
 from java.lang import Boolean;
 from javax.swing import JScrollPane;
@@ -71,6 +67,14 @@ from threading import Lock
 from threading import Thread
 import traceback
 import re
+import urllib2
+import json
+import base64
+import random
+import string
+
+
+AUTHMATRIX_VERSION = "0.6.3"
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
     
@@ -85,7 +89,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # obtain an Burp extension helpers object
         self._helpers = callbacks.getHelpers()
         # set our extension name
-        callbacks.setExtensionName("AuthMatrix - v0.6.2")
+        callbacks.setExtensionName("AuthMatrix - v"+AUTHMATRIX_VERSION)
 
         # DB that holds everything users, roles, and messages
         self._db = MatrixDB()
@@ -221,10 +225,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._messageTable.redrawTable()
 
         class actionChangeDomain(ActionListener):
-            def replaceDomain(self, requestData, oldDomain, newDomain):
-                reqstr = StringUtil.fromBytes(requestData)
-                reqstr = reqstr.replace("Host: "+oldDomain, "Host: "+newDomain)
-                newreq = StringUtil.toBytes(reqstr)
+            def replaceDomain(self, requestResponse, newDomain):
+                requestInfo = selfExtender._helpers.analyzeRequest(requestResponse)
+                reqBody = requestResponse.getRequest()[requestInfo.getBodyOffset():]            
+                newHeaders = ModifyMessage.getNewHeaders(requestInfo, None, "Host: "+newDomain)
+                newreq = selfExtender._helpers.buildHttpMessage(newHeaders, reqBody)
                 return newreq
 
             def actionPerformed(self,e):
@@ -236,13 +241,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
                     service = None if len(messages)>1 else messages[0]._requestResponse.getHttpService()
 
-                    ok, host, port, tls = selfExtender.changeDomainPopup(service)
+                    ok, host, port, tls, replaceHost = selfExtender.changeDomainPopup(service)
                     if ok and host:
                         if not port or not port.isdigit():
                             port = 443 if tls else 80
                         for m in messages:
-                            # TODO is replacing the host header appropriate here?
-                            request = self.replaceDomain(m._requestResponse.getRequest(), m._requestResponse.getHttpService().getHost(), host)
+                            if replaceHost:
+                                request = self.replaceDomain(m._requestResponse, host)
+                            else:
+                                request = m._requestResponse.getRequest()
                             m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request)
                             m.clearResults()
                     selfExtender._selectedColumn = -1
@@ -399,6 +406,32 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 #self._messageTable.getModel().addRow(row)
             self._messageTable.redrawTable()
 
+        class UserCookiesActionListener(ActionListener):
+            def __init__(self, currentUser, extender):
+                self.currentUser=currentUser
+                self.extender = extender
+
+            def actionPerformed(self, e):
+                for messageInfo in messages:
+                    cookieVal = ""
+                    requestInfo = self.extender._helpers.analyzeRequest(messageInfo)
+                    for header in requestInfo.getHeaders():
+                        cookieStr = "Cookie: "
+                        if header.startswith(cookieStr):
+                            cookieVal = header[len(cookieStr):]
+
+                    # Grab Set-Cookie headers from the responses as well
+                    response = messageInfo.getResponse()
+                    if response:
+                        responseInfo = self.extender._helpers.analyzeResponse(response)
+                        responseCookies = responseInfo.getCookies()
+                        newCookies = "; ".join([x.getName()+"="+x.getValue() for x in responseCookies])
+                        cookieVal = ModifyMessage.cookieReplace(cookieVal,newCookies)
+
+                    self.currentUser._cookies = cookieVal
+
+                self.extender._userTable.redrawTable()
+
         ret = []
         messages = invocation.getSelectedMessages()
 
@@ -413,6 +446,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             menuItem = JMenuItem("Send request(s) to AuthMatrix");
             menuItem.addActionListener(addRequestsToTab)
             ret.append(menuItem)
+
+            if len(messages)==1:
+                # Send cookies to user:
+                for i in self._db.getActiveUserIndexes():
+                    user = self._db.arrayOfUsers[i]
+                    menuItem = JMenuItem("Send cookies to AuthMatrix user: "+user._name);
+                    menuItem.addActionListener(UserCookiesActionListener(user, self))
+                    ret.append(menuItem)
+
         return ret
     
     ##
@@ -474,9 +516,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if result != JOptionPane.YES_OPTION:
                     return
             fileName = f.getPath()
-            outs = ObjectOutputStream(FileOutputStream(fileName))
-            outs.writeObject(self._db.getSaveableObject())
-            outs.close()
+            fileout = open(fileName,'w')
+            fileout.write(self._db.getSaveableJson())
+            fileout.close()
 
     def loadClick(self,e):
         returnVal = self._fc.showOpenDialog(self._splitpane)
@@ -496,11 +538,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             f = self._fc.getSelectedFile()
             fileName = f.getPath()
             
-            ins = ObjectInputStream(FileInputStream(fileName))
-            dbData=ins.readObject()
-            ins.close()
+            filein = open(fileName,'r')
+            jsonText = filein.read()
+            filein.close()
+            # Check if using on older state file compatible with v0.5.2 or greater
+            if not jsonText or jsonText[0] !="{":
+                self._db.loadLegacy(fileName,self)
+            else:
+                self._db.loadJson(jsonText,self)
 
-            self._db.load(dbData,self)
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
             self._chainTable.redrawTable()
@@ -523,6 +569,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         hostField = JTextField(25)
         portField = JTextField(25)
         checkbox = JCheckBox()
+
+        replaceHostCheckbox = JCheckBox()
+        replaceHostCheckbox.setSelected(True)
+        
         errorField = JLabel("\n")
         errorField.setForeground(Color.orange);
         errorField.setFont
@@ -580,7 +630,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         fourthline.add(checkbox)
         fourthline.add(JLabel("Use HTTPS"))
         fifthline = JPanel()
-        fifthline.add(errorField)
+        fifthline.add(replaceHostCheckbox)
+        fifthline.add(JLabel("Replace Host in HTTP header"))
+        sixthline = JPanel()
+        sixthline.add(errorField)
 
         gbc.gridy = 0
         domainPanel.add(firstline,gbc)
@@ -592,13 +645,16 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         domainPanel.add(fourthline, gbc)
         gbc.gridy = 4
         domainPanel.add(fifthline, gbc)
+        gbc.gridy = 5
+        domainPanel.add(sixthline, gbc)
+
 
         result = JOptionPane.showConfirmDialog(
             self._splitpane,domainPanel, "Configure target details", JOptionPane.OK_CANCEL_OPTION)
         cancelled = (result == JOptionPane.CANCEL_OPTION)
         if cancelled or not isValidDomain(hostField.getText()):
-            return (False, None, None, False)
-        return (True, hostField.getText(), portField.getText(), checkbox.isSelected())
+            return (False, None, None, False, False)
+        return (True, hostField.getText(), portField.getText(), checkbox.isSelected(), replaceHostCheckbox.isSelected())
 
     ##
     ## Methods for running messages and analyzing results
@@ -639,79 +695,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         finally:
             self.lockButtons(False)
             self._db.lock.release()
-            self.colorCodeResults()
-
-    # Replaces headers/cookies with user's token
-    def getNewHeaders(self, requestInfo, newCookieString, newHeader):
-        headers = requestInfo.getHeaders()
-
-        # Handle Cookies
-        if newCookieString:
-            cookieHeader = "Cookie:"
-            previousCookies = []
-            # NOTE: getHeaders has to be called again here cuz of java references
-            for header in requestInfo.getHeaders():
-                # Find and remove existing cookie header
-                if str(header).startswith(cookieHeader):
-                    previousCookies = str(header)[len(cookieHeader):].replace(" ","").split(";")
-                    headers.remove(header)
-
-            newCookies = newCookieString.replace(" ","").split(";")
-            newCookieVariableNames = []
-            for newCookie in newCookies:
-                # If its a valid cookie
-                equalsToken = newCookie.find("=")
-                if equalsToken >= 0:
-                    newCookieVariableNames.append(newCookie[0:equalsToken+1])
-
-            # Add all the old unchanged cookies
-            for previousCookie in previousCookies:
-                # If its a valid cookie
-                equalsToken = previousCookie.find("=")
-                if equalsToken >= 0:
-                    if previousCookie[0:equalsToken+1] not in newCookieVariableNames:
-                        newCookies.append(previousCookie)
-
-            # Remove whitespace
-            newCookies = [x for x in newCookies if x]
-            headers.add(cookieHeader+" "+";".join(newCookies))
-
-        # Handle Custom Header
-        if newHeader:
-            # TODO: Support multiple headers with a newline somehow
-            # Remove previous HTTP Header
-            colon = newHeader.find(":")
-            if colon >= 0:
-                # getHeaders has to be called again here cuz of java references
-                for header in requestInfo.getHeaders():
-                    # If the header already exists, remove it
-                    if str(header).startswith(newHeader[0:colon+1]):
-                        headers.remove(header)
-            headers.add(newHeader)
-
-        return headers
-
-    # Add static CSRF token if available
-    def getNewBody(self, requestInfo, reqBody, postargs):
-        
-        # Kinda hacky, but for now it will add the token as long as there is some content in the post body
-        # Even if its a GET request.  This screws up when original requests have no body though... oh well...
-        # TODO: Currently only handles one token
-        newBody = reqBody
-        if postargs and len(reqBody):
-            delimeter = postargs.find("=")
-            if delimeter >= 0:
-                csrfname = postargs[0:delimeter]
-                csrfvalue = postargs[delimeter+1:]
-                params = requestInfo.getParameters()
-                for param in params:
-                    if str(param.getName())==csrfname:
-                        # Handle CSRF Tokens in Body
-                        if param.getType() == 1:
-                            newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
-                if newBody == reqBody:
-                    newBody = reqBody+StringUtil.toBytes("&"+postargs)
-        return newBody
+            self._messageTable.redrawTable()
 
 
     def runMessage(self, messageIndex):
@@ -745,18 +729,21 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
             userEntry = self._db.arrayOfUsers[userIndex]
-            newHeaders = self.getNewHeaders(requestInfo, userEntry._cookies, userEntry._header)
-            newBody = self.getNewBody(requestInfo, reqBody, userEntry._postargs)
-            # Construct and send a message with the new headers
-            message = self._helpers.buildHttpMessage(newHeaders, newBody)
+            newHeaders = ModifyMessage.getNewHeaders(requestInfo, userEntry._cookies, userEntry._header)
+            newBody = ModifyMessage.getNewBody(requestInfo, reqBody, userEntry._postargs)
 
             # Replace with Chain
             for toRegex, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
-                message = StringUtil.fromBytes(message)
-                match = re.search(toRegex, message, re.DOTALL)
-                if match and len(match.groups()):
-                    message = message[0:match.start(1)]+toValue+message[match.end(1):]
-                message = StringUtil.toBytes(message)
+                newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
+                newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
+
+            # Replace Custom Special Types (i.e. Random)
+            newBody = StringUtil.toBytes(ModifyMessage.customReplace([StringUtil.fromBytes(newBody)])[0])
+            newHeaders = ModifyMessage.customReplace(newHeaders)
+
+            # Construct and send a message with the new headers
+            message = self._helpers.buildHttpMessage(newHeaders, newBody)
+
 
             # Run with threading to timeout correctly   
             tempRequestResponse.append(None)         
@@ -803,8 +790,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             expectedResult = self.checkResult(messageEntry, roleIndex, activeCheckBoxedRoles)
             messageEntry.setRoleResultByRoleIndex(roleIndex, expectedResult)
                     
-    def colorCodeResults(self):
-        self._messageTable.redrawTable()
 
     def clearColorResults(self, messageIndexArray = None):
         if not messageIndexArray:
@@ -858,6 +843,142 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         return True
 
+
+##
+## Static methods to modify requests during runs
+##
+class ModifyMessage():
+
+    @staticmethod
+    def cookieReplace(oldCookieStr, newCookieStr):
+        previousCookies = oldCookieStr.replace(" ","").split(";")
+
+        newCookies = newCookieStr.replace(" ","").split(";")
+        newCookieVariableNames = []
+        for newCookie in newCookies:
+            # If its a valid cookie
+            equalsToken = newCookie.find("=")
+            if equalsToken >= 0:
+                newCookieVariableNames.append(newCookie[0:equalsToken+1])
+
+        # Add all the old unchanged cookies
+        for previousCookie in previousCookies:
+            # If its a valid cookie
+            equalsToken = previousCookie.find("=")
+            if equalsToken >= 0:
+                if previousCookie[0:equalsToken+1] not in newCookieVariableNames:
+                    newCookies.append(previousCookie)
+
+        # Remove whitespace
+        newCookies = [x for x in newCookies if x]
+        return "; ".join(newCookies)
+
+
+    # Replaces headers/cookies with user's token
+    @staticmethod
+    def getNewHeaders(requestInfo, newCookieStr, newHeader):
+        ret = requestInfo.getHeaders()
+        headers = requestInfo.getHeaders()
+
+        # Handle Cookies
+        if newCookieStr:
+            replaceIndex = -1
+            cookieHeader = "Cookie:"
+            oldCookieStr = ""
+            # Find existing cookie header
+            for i in range(headers.size()):
+                header = headers[i]
+                if str(header).startswith(cookieHeader):
+                    replaceIndex = i
+                    oldCookieStr = str(header)[len(cookieHeader):]
+
+            newCookiesHeader = cookieHeader+" "+ModifyMessage.cookieReplace(oldCookieStr,newCookieStr)
+
+            if replaceIndex >= 0:
+                ret.set(replaceIndex, newCookiesHeader)
+            else:
+                ret.add(newCookiesHeader)
+
+        # Handle Custom Header
+        if newHeader:
+            replaceIndex = -1
+            # TODO: Support multiple headers with a newline somehow
+            colon = newHeader.find(":")
+            if colon >= 0:
+                for i in range(headers.size()):
+                    header = headers[i]
+                    # If the header already exists, remove it
+                    if str(header).startswith(newHeader[0:colon+1]):
+                        replaceIndex = i
+            if replaceIndex >= 0:
+                ret.set(replaceIndex, newHeader)
+            else:
+                ret.add(newHeader)
+
+        return ret
+
+    # Add static CSRF token if available
+    # TODO Deprecate
+    @staticmethod
+    def getNewBody(requestInfo, reqBody, postargs):
+        
+        # Kinda hacky, but for now it will add the token as long as there is some content in the post body
+        # Even if its a GET request.  This screws up when original requests have no body though... oh well...
+        # TODO: Currently only handles one token
+        newBody = reqBody
+        if postargs and len(reqBody):
+            delimeter = postargs.find("=")
+            if delimeter >= 0:
+                csrfname = postargs[0:delimeter]
+                csrfvalue = postargs[delimeter+1:]
+                params = requestInfo.getParameters()
+                for param in params:
+                    if str(param.getName())==csrfname:
+                        # Handle CSRF Tokens in Body
+                        if param.getType() == 1:
+                            newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
+                if newBody == reqBody:
+                    newBody = reqBody+StringUtil.toBytes("&"+postargs)
+        return newBody
+
+    @staticmethod
+    def chainReplace(toRegex, toValue, toArray):
+        ret = ArrayList()
+        # HACK: URLEncode only the first line (either url path or body)
+        encode = True
+        for to in toArray:
+            match = re.search(toRegex, to, re.DOTALL)
+            if match and len(match.groups()):
+                if encode:
+                    toValueNew = urllib2.quote(toValue)
+                else:
+                    toValueNew = toValue
+                ret.add(to[0:match.start(1)]+toValueNew+to[match.end(1):])
+            else:
+                ret.add(to)
+            encode=False
+        return ret
+
+    ## Method to replace custom special types in messages
+    @staticmethod
+    def customReplace(toArray):
+        ret = ArrayList()
+        customPrefix = "#{AUTHMATRIX:"
+        for to in toArray:
+            toNew = to
+            if customPrefix in to:
+                if customPrefix+"RANDOM}" in to:
+                    # This will produce a random 4 char numeric string
+                    # Most common use case is for APIs that reject requests that are identical to a previous request
+                    randomString = ''.join(random.choice(string.digits) for _ in range(4))
+                    toNew = to.replace(customPrefix+"RANDOM}",randomString)
+            ret.add(toNew)
+
+        return ret
+
+
+
+
 ##
 ## DB Class that holds all configuration data
 ##
@@ -871,8 +992,6 @@ class MatrixDB():
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
         self.LOAD_TIMEOUT = 10.0
-        self.FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
-        self.AUTHMATRIX_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
         self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
 
         self.lock = Lock()
@@ -884,6 +1003,7 @@ class MatrixDB():
         self.deletedRoleCount = 0
         self.deletedMessageCount = 0
         self.deletedChainCount = 0
+
 
     # Returns the index of the user, whether its new or not
     def getOrCreateUser(self, name):
@@ -978,7 +1098,19 @@ class MatrixDB():
         self.deletedArrayCount = 0
         self.lock.release()
 
-    def load(self, db, extender):
+    def loadLegacy(self, fileName, extender):
+        from java.io import ObjectOutputStream;
+        from java.io import FileOutputStream;
+        from java.io import ObjectInputStream;
+        from java.io import FileInputStream;
+
+        FAILURE_REGEX_SERIALIZE_CODE = "|AUTHMATRIXFAILUREREGEXPREFIX|"
+        AUTHMATRIX_SERIALIZE_CODE = "|AUTHMATRIXCOOKIEHEADERSERIALIZECODE|"
+
+        ins = ObjectInputStream(FileInputStream(fileName))
+        db=ins.readObject()
+        ins.close()
+
         self.lock.acquire()
         self.arrayOfUsers = ArrayList()
         self.arrayOfRoles = ArrayList()
@@ -991,8 +1123,8 @@ class MatrixDB():
 
 
         for message in db.arrayOfMessages:
-            if message._successRegex.startswith(self.FAILURE_REGEX_SERIALIZE_CODE):
-                regex = message._successRegex[len(self.FAILURE_REGEX_SERIALIZE_CODE):]
+            if message._successRegex.startswith(FAILURE_REGEX_SERIALIZE_CODE):
+                regex = message._successRegex[len(FAILURE_REGEX_SERIALIZE_CODE):]
                 failureRegexMode=True
             else:
                 regex = message._successRegex
@@ -1020,16 +1152,16 @@ class MatrixDB():
                 name=""
                 sourceUser=""
                 if user._name:
-                    namesplit = user._name.split(self.AUTHMATRIX_SERIALIZE_CODE)
+                    namesplit = user._name.split(AUTHMATRIX_SERIALIZE_CODE)
                     name=namesplit[0]
                     if len(namesplit)>1:
                         sourceUser=namesplit[1]
 
-                token = user._token.split(self.AUTHMATRIX_SERIALIZE_CODE)
+                token = user._token.split(AUTHMATRIX_SERIALIZE_CODE)
                 assert(len(token)==2)
                 fromID = token[0]
                 fromRegex = token[1]
-                staticcsrf = user._staticcsrf.split(self.AUTHMATRIX_SERIALIZE_CODE)
+                staticcsrf = user._staticcsrf.split(AUTHMATRIX_SERIALIZE_CODE)
                 assert(len(staticcsrf)==2)
                 toID = staticcsrf[0]
                 toRegex = staticcsrf[1]
@@ -1046,7 +1178,7 @@ class MatrixDB():
                     ))
             else: 
                 # Normal User
-                token = [""] if not user._token else user._token.split(self.AUTHMATRIX_SERIALIZE_CODE)
+                token = [""] if not user._token else user._token.split(AUTHMATRIX_SERIALIZE_CODE)
                 cookies = token[0]
                 header = "" if len(token)==1 else token[1]
                 name = "" if not user._name else user._name
@@ -1063,73 +1195,152 @@ class MatrixDB():
 
         self.lock.release()
 
-    
+    def loadJson(self, jsonText, extender):
+        # TODO: Weird issue where saving serialized json doesn't use correct capitalization on bools
+        # This replacement might have weird results, but most are mitigated by using base64 encoding
+        jsonFixed = jsonText.replace(": False",": false").replace(": True",": true")
 
-    def getSaveableObject(self):
-        # NOTE: might not need locks?
+        stateDict = json.loads(jsonFixed)
+
         self.lock.acquire()
-        serializedMessages = []
-        serializedRoles = []
-        serializedUsers = []
-        for message in self.arrayOfMessages:
-            regex = self.FAILURE_REGEX_SERIALIZE_CODE+message._regex if message.isFailureRegex() else message._regex
-            serializedMessages.append(MessageEntryData(
-                message._index, 
-                message._tableRow,
-                message._requestResponse.getRequest(), 
-                message._requestResponse.getHttpService().getHost(),
-                message._requestResponse.getHttpService().getPort(),
-                message._requestResponse.getHttpService().getProtocol(),
-                message._name, message._roles, regex, message._deleted))
-        for role in self.arrayOfRoles:
-            serializedRoles.append(RoleEntryData(
-                role._index,
-                role._column+3, # NOTE this is done to preserve compatability with older state files
-                role._column+3, # NOTE this is done to preserve compatability with older state files
-                role._name,
-                role._deleted))
-        for user in self.arrayOfUsers:
-            cookies = user._cookies if user._cookies else ""
-            header = user._header if user._header else ""
-            name = user._name if user._name else ""
-            postargs = user._postargs if user._postargs else ""
-            token = cookies + self.AUTHMATRIX_SERIALIZE_CODE + header
-            serializedUsers.append(UserEntryData(
-                user._index,
-                user._tableRow,
-                name,
-                user._roles,
-                user._deleted,
-                token,
-                postargs))
-        # NOTE to preserve backwords compatability, chains are stored in UserEntries in a really hacky way
-        for chain in self.arrayOfChains:
-            name = chain._name if chain._name else ""
-            nameAndSourceUser = name if not chain._sourceUser else name+self.AUTHMATRIX_SERIALIZE_CODE+chain._sourceUser
-            fromID = chain._fromID if chain._fromID else ""
-            fromRegex = chain._fromRegex if chain._fromRegex else ""
-            toID = chain._toID if chain._toID else ""
-            toRegex = chain._toRegex if chain._toRegex else ""
-            serializedUsers.append(UserEntryData(
-                chain._index,
-                chain._tableRow,
-                nameAndSourceUser,
-                self.deletedChainCount,
-                chain._deleted,
-                fromID+self.AUTHMATRIX_SERIALIZE_CODE+fromRegex,
-                toID+self.AUTHMATRIX_SERIALIZE_CODE+toRegex
-                ))
+        self.arrayOfUsers = ArrayList()
+        self.arrayOfRoles = ArrayList()
+        self.arrayOfMessages = ArrayList()
+        self.arrayOfChains = ArrayList()
+        self.deletedUserCount = stateDict["deletedUserCount"]
+        self.deletedRoleCount = stateDict["deletedRoleCount"]
+        self.deletedMessageCount = stateDict["deletedMessageCount"]
+        self.deletedChainCount = stateDict["deletedChainCount"]
 
-        ret = MatrixDBData(
-            serializedMessages,
-            serializedRoles,
-            serializedUsers,
-            self.deletedUserCount,
-            self.deletedRoleCount,
-            self.deletedMessageCount)
+        for roleEntry in stateDict["arrayOfRoles"]:
+            self.arrayOfRoles.add(RoleEntry(
+                roleEntry["index"],
+                roleEntry["column"],
+                roleEntry["name"],
+                roleEntry["deleted"]))
+
+
+        for userEntry in stateDict["arrayOfUsers"]:
+            self.arrayOfUsers.add(UserEntry(
+                userEntry["index"],
+                userEntry["tableRow"],
+                userEntry["name"],
+                {int(x): userEntry["roles"][x] for x in userEntry["roles"].keys()}, # convert keys to ints
+                userEntry["deleted"],
+                base64.b64decode(userEntry["cookiesBase64"]),
+                base64.b64decode(userEntry["headerBase64"]),
+                base64.b64decode(userEntry["postargsBase64"])))
+
+        # TODO chainResults?
+        
+        for messageEntry in stateDict["arrayOfMessages"]:
+            self.arrayOfMessages.add(MessageEntry(
+                messageEntry["index"],
+                messageEntry["tableRow"],
+                RequestResponseStored(
+                    extender,
+                    messageEntry["host"],
+                    messageEntry["port"],
+                    messageEntry["protocol"],
+                    StringUtil.toBytes(base64.b64decode(messageEntry["requestBase64"]))),
+                messageEntry["name"], 
+                {int(x): messageEntry["roles"][x] for x in messageEntry["roles"].keys()}, # convert keys to ints
+                base64.b64decode(messageEntry["regexBase64"]), 
+                messageEntry["deleted"], 
+                messageEntry["failureRegexMode"]))
+
+        # TODO roleResults (need to convert keys) and potentially userRuns
+
+        for chainEntry in stateDict["arrayOfChains"]:
+            self.arrayOfChains.add(ChainEntry(
+                chainEntry["index"],
+                chainEntry["tableRow"],
+                chainEntry["name"],
+                chainEntry["fromID"],
+                base64.b64decode(chainEntry["fromRegexBase64"]),
+                chainEntry["toID"],
+                base64.b64decode(chainEntry["toRegexBase64"]),
+                chainEntry["deleted"],
+                chainEntry["sourceUser"],
+                chainEntry["enabled"]
+                ))
+        
+        # TODO fromStart, fromEnd, toStart, toEnd?
 
         self.lock.release()
-        return ret
+
+
+
+    def getSaveableJson(self):
+
+        stateDict = {"version":AUTHMATRIX_VERSION,
+        "deletedUserCount":self.deletedUserCount,
+        "deletedRoleCount":self.deletedRoleCount,
+        "deletedMessageCount":self.deletedMessageCount,
+        "deletedChainCount":self.deletedChainCount}
+
+        stateDict["arrayOfRoles"] = []
+        for roleEntry in self.arrayOfRoles:
+            stateDict["arrayOfRoles"].append({
+                    "index":roleEntry._index,
+                    "name":roleEntry._name,
+                    "deleted":roleEntry._deleted,
+                    "column":roleEntry._column
+                })
+
+        stateDict["arrayOfUsers"] = []
+        for userEntry in self.arrayOfUsers:
+            stateDict["arrayOfUsers"].append({
+                    "index":userEntry._index,
+                    "name":userEntry._name,
+                    "roles":userEntry._roles,
+                    "deleted":userEntry._deleted,
+                    "tableRow":userEntry._tableRow,
+                    "cookiesBase64":base64.b64encode(userEntry._cookies),
+                    "headerBase64":base64.b64encode(userEntry._header),
+                    "postargsBase64":base64.b64encode(userEntry._postargs),
+                    "chainResults":userEntry._chainResults
+                })
+
+        stateDict["arrayOfMessages"] = []
+        for messageEntry in self.arrayOfMessages:
+            stateDict["arrayOfMessages"].append({
+                    "index":messageEntry._index, 
+                    "tableRow":messageEntry._tableRow,
+                    "requestBase64":base64.b64encode(StringUtil.fromBytes(messageEntry._requestResponse.getRequest())),
+                    "host":messageEntry._requestResponse.getHttpService().getHost(),
+                    "port":messageEntry._requestResponse.getHttpService().getPort(),
+                    "protocol":messageEntry._requestResponse.getHttpService().getProtocol(),
+                    "name":messageEntry._name, 
+                    "roles":messageEntry._roles, 
+                    "regexBase64":base64.b64encode(messageEntry._regex), 
+                    "deleted":messageEntry._deleted,
+                    "failureRegexMode":messageEntry._failureRegexMode,
+                    #"userRuns":messageEntry._userRuns,
+                    "RunResultForRoleID":messageEntry._roleResults
+                })
+
+        stateDict["arrayOfChains"] = []
+        for chainEntry in self.arrayOfChains:
+            stateDict["arrayOfChains"].append({
+                    "index":chainEntry._index,
+                    "fromID":chainEntry._fromID,
+                    "fromRegexBase64":base64.b64encode(chainEntry._fromRegex),
+                    "toID":chainEntry._toID,
+                    "toRegexBase64":base64.b64encode(chainEntry._toRegex),
+                    "deleted":chainEntry._deleted,
+                    "tableRow":chainEntry._tableRow,
+                    "name":chainEntry._name,
+                    "sourceUser":chainEntry._sourceUser,
+                    "enabled":chainEntry._enabled,
+                    "fromStart":chainEntry._fromStart,
+                    "fromEnd":chainEntry._fromEnd,
+                    "toStart":chainEntry._toStart,
+                    "toEnd":chainEntry._toEnd
+                })
+
+        # BUG: this is not using the correct capitalization on booleans after loading legacy states
+        return json.dumps(stateDict)
 
     def getActiveUserIndexes(self):
         return [x._index for x in self.arrayOfUsers if not x.isDeleted()]
@@ -1985,65 +2196,6 @@ class ChainEntry:
 
 
 ##
-## SERIALIZABLE CLASSES
-##
-
-# Serializable DB
-# Used to store Database to Disk on Save and Load
-class MatrixDBData():
-
-    def __init__(self, arrayOfMessages, arrayOfRoles, arrayOfUsers, deletedUserCount, deletedRoleCount, deletedMessageCount):
-        
-        self.arrayOfMessages = arrayOfMessages
-        self.arrayOfRoles = arrayOfRoles
-        self.arrayOfUsers = arrayOfUsers
-        self.deletedUserCount = deletedUserCount
-        self.deletedRoleCount = deletedRoleCount
-        self.deletedMessageCount = deletedMessageCount
-
-# Serializable MessageEntry
-# Used since the Burp RequestResponse object can not be serialized
-class MessageEntryData:
-
-    def __init__(self, index, tableRow, requestData, host, port, protocol, name, roles, successRegex, deleted):
-        self._index = index
-        self._tableRow = tableRow
-        self._requestData = requestData
-        self._host = host
-        self._port = port
-        self._protocol = protocol
-        self._url = "" # NOTE obsolete, kept for backwords compatability
-        self._name = name
-        self._roles = roles
-        # NOTE: to preserve backwords compatability, successregex will have a specific prefix "|AMFAILURE|" to indicate FailureRegexMode
-        self._successRegex = successRegex
-        self._deleted = deleted
-        return
-
-class RoleEntryData:
-
-    def __init__(self,index,mTableColumnIndex,uTableColumnIndex,name,deleted):
-        self._index = index
-        self._name = name
-        self._deleted = deleted
-        # NOTE: to preserve backwords compatibility, these will be the dynamic column +3
-        self._mTableColumn = mTableColumnIndex
-        self._uTableColumn = uTableColumnIndex
-        return
-
-class UserEntryData:
-
-    def __init__(self, index, tableRow, name, roles, deleted, token, staticcsrf):
-        self._index = index
-        self._name = name
-        self._roles = roles
-        self._deleted = deleted
-        self._tableRow = tableRow
-        self._token = token
-        self._staticcsrf = staticcsrf
-        return
-
-##
 ## RequestResponse Implementation
 ##
 
@@ -2152,3 +2304,61 @@ class MessageTableRowTransferHandler(TransferHandler):
 
 
 
+##
+## LEGACY SERIALIZABLE CLASSES
+##
+
+# Serializable DB
+# Used to store Database to Disk on Save and Load
+class MatrixDBData():
+
+    def __init__(self, arrayOfMessages, arrayOfRoles, arrayOfUsers, deletedUserCount, deletedRoleCount, deletedMessageCount):
+        
+        self.arrayOfMessages = arrayOfMessages
+        self.arrayOfRoles = arrayOfRoles
+        self.arrayOfUsers = arrayOfUsers
+        self.deletedUserCount = deletedUserCount
+        self.deletedRoleCount = deletedRoleCount
+        self.deletedMessageCount = deletedMessageCount
+
+# Serializable MessageEntry
+# Used since the Burp RequestResponse object can not be serialized
+class MessageEntryData:
+
+    def __init__(self, index, tableRow, requestData, host, port, protocol, name, roles, successRegex, deleted):
+        self._index = index
+        self._tableRow = tableRow
+        self._requestData = requestData
+        self._host = host
+        self._port = port
+        self._protocol = protocol
+        self._url = "" # NOTE obsolete, kept for backwords compatability
+        self._name = name
+        self._roles = roles
+        # NOTE: to preserve backwords compatability, successregex will have a specific prefix "|AMFAILURE|" to indicate FailureRegexMode
+        self._successRegex = successRegex
+        self._deleted = deleted
+        return
+
+class RoleEntryData:
+
+    def __init__(self,index,mTableColumnIndex,uTableColumnIndex,name,deleted):
+        self._index = index
+        self._name = name
+        self._deleted = deleted
+        # NOTE: to preserve backwords compatibility, these will be the dynamic column +3
+        self._mTableColumn = mTableColumnIndex
+        self._uTableColumn = uTableColumnIndex
+        return
+
+class UserEntryData:
+
+    def __init__(self, index, tableRow, name, roles, deleted, token, staticcsrf):
+        self._index = index
+        self._name = name
+        self._roles = roles
+        self._deleted = deleted
+        self._tableRow = tableRow
+        self._token = token
+        self._staticcsrf = staticcsrf
+        return

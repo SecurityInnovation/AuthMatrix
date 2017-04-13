@@ -1,3 +1,17 @@
+v0.6.3 - 04/15/2017
+
+STATE FILE COMPATIBILITY - v0.5.2 and greater
+
+* Updated Serialization format to JSON.  Loading legacy state files is still supported for now, however, all new state files will be saved to the new format. Additionally, the results of a run are now exported as well in the RunResultForRoleID field of the saved json state. 
+
+NOTE: For RunResultForRoleID in the JSON state file, the key of the array matches the RoleID and the value is a boolean indicating true (green) or false (red or blue).
+
+* New right-click context options for sending cookies to users. Sends both current cookies and cookies set in the message's reponse.
+
+* Fixed bug in chaining where content-length wouldn't update appropriately
+
+* Added randomness generation.  Set the string #{AUTHMATRIX:RANDOM} anywhere in the original message's header or body and the run will replace it with a random 4 char numeric string. Most common use case is for APIs that reject requests that are identical to a previous request.
+
 v0.6.2 - 10/31/2016
 
 STATE FILE COMPATIBILITY - v0.5.2 and greater
