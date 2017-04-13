@@ -653,7 +653,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._splitpane,domainPanel, "Configure target details", JOptionPane.OK_CANCEL_OPTION)
         cancelled = (result == JOptionPane.CANCEL_OPTION)
         if cancelled or not isValidDomain(hostField.getText()):
-            return (False, None, None, False)
+            return (False, None, None, False, False)
         return (True, hostField.getText(), portField.getText(), checkbox.isSelected(), replaceHostCheckbox.isSelected())
 
     ##
