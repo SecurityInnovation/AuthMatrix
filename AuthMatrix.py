@@ -413,12 +413,23 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
             def actionPerformed(self, e):
                 for messageInfo in messages:
+                    cookieVal = ""
                     requestInfo = self.extender._helpers.analyzeRequest(messageInfo)
                     for header in requestInfo.getHeaders():
                         cookieStr = "Cookie: "
                         if header.startswith(cookieStr):
                             cookieVal = header[len(cookieStr):]
-                            self.currentUser._cookies = cookieVal
+
+                    # Grab Set-Cookie headers from the responses as well
+                    response = messageInfo.getResponse()
+                    if response:
+                        responseInfo = self.extender._helpers.analyzeResponse(response)
+                        responseCookies = responseInfo.getCookies()
+                        newCookies = "; ".join([x.getName()+"="+x.getValue() for x in responseCookies])
+                        cookieVal = ModifyMessage.cookieReplace(cookieVal,newCookies)
+
+                    self.currentUser._cookies = cookieVal
+
                 self.extender._userTable.redrawTable()
 
         ret = []
@@ -838,43 +849,51 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 ##
 class ModifyMessage():
 
+    @staticmethod
+    def cookieReplace(oldCookieStr, newCookieStr):
+        previousCookies = oldCookieStr.replace(" ","").split(";")
+
+        newCookies = newCookieStr.replace(" ","").split(";")
+        newCookieVariableNames = []
+        for newCookie in newCookies:
+            # If its a valid cookie
+            equalsToken = newCookie.find("=")
+            if equalsToken >= 0:
+                newCookieVariableNames.append(newCookie[0:equalsToken+1])
+
+        # Add all the old unchanged cookies
+        for previousCookie in previousCookies:
+            # If its a valid cookie
+            equalsToken = previousCookie.find("=")
+            if equalsToken >= 0:
+                if previousCookie[0:equalsToken+1] not in newCookieVariableNames:
+                    newCookies.append(previousCookie)
+
+        # Remove whitespace
+        newCookies = [x for x in newCookies if x]
+        return "; ".join(newCookies)
+
+
     # Replaces headers/cookies with user's token
     @staticmethod
-    def getNewHeaders(requestInfo, newCookieString, newHeader):
+    def getNewHeaders(requestInfo, newCookieStr, newHeader):
         ret = requestInfo.getHeaders()
         headers = requestInfo.getHeaders()
 
         # Handle Cookies
-        if newCookieString:
+        if newCookieStr:
             replaceIndex = -1
             cookieHeader = "Cookie:"
-            previousCookies = []
+            oldCookieStr = ""
+            # Find existing cookie header
             for i in range(headers.size()):
                 header = headers[i]
-                # Find existing cookie header
                 if str(header).startswith(cookieHeader):
-                    previousCookies = str(header)[len(cookieHeader):].replace(" ","").split(";")
                     replaceIndex = i
+                    oldCookieStr = str(header)[len(cookieHeader):]
 
-            newCookies = newCookieString.replace(" ","").split(";")
-            newCookieVariableNames = []
-            for newCookie in newCookies:
-                # If its a valid cookie
-                equalsToken = newCookie.find("=")
-                if equalsToken >= 0:
-                    newCookieVariableNames.append(newCookie[0:equalsToken+1])
+            newCookiesHeader = cookieHeader+" "+ModifyMessage.cookieReplace(oldCookieStr,newCookieStr)
 
-            # Add all the old unchanged cookies
-            for previousCookie in previousCookies:
-                # If its a valid cookie
-                equalsToken = previousCookie.find("=")
-                if equalsToken >= 0:
-                    if previousCookie[0:equalsToken+1] not in newCookieVariableNames:
-                        newCookies.append(previousCookie)
-
-            # Remove whitespace
-            newCookies = [x for x in newCookies if x]
-            newCookiesHeader = cookieHeader+" "+"; ".join(newCookies)
             if replaceIndex >= 0:
                 ret.set(replaceIndex, newCookiesHeader)
             else:
