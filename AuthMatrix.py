@@ -1202,6 +1202,10 @@ class MatrixDB():
 
         stateDict = json.loads(jsonFixed)
 
+        if stateDict["version"] != AUTHMATRIX_VERSION:
+            print "Invalid Version in State File ("+stateDict["version"]+")"
+            return
+
         self.lock.acquire()
         self.arrayOfUsers = ArrayList()
         self.arrayOfRoles = ArrayList()
@@ -1249,7 +1253,7 @@ class MatrixDB():
                 messageEntry["deleted"], 
                 messageEntry["failureRegexMode"]))
 
-        # TODO roleResults (need to convert keys) and potentially userRuns
+        # TODO roleResults and userRuns (need to convert keys)
 
         for chainEntry in stateDict["arrayOfChains"]:
             self.arrayOfChains.add(ChainEntry(
@@ -1304,6 +1308,7 @@ class MatrixDB():
 
         stateDict["arrayOfMessages"] = []
         for messageEntry in self.arrayOfMessages:
+
             stateDict["arrayOfMessages"].append({
                     "index":messageEntry._index, 
                     "tableRow":messageEntry._tableRow,
@@ -1316,8 +1321,11 @@ class MatrixDB():
                     "regexBase64":base64.b64encode(messageEntry._regex), 
                     "deleted":messageEntry._deleted,
                     "failureRegexMode":messageEntry._failureRegexMode,
-                    #"userRuns":messageEntry._userRuns,
-                    "RunResultForRoleID":messageEntry._roleResults
+                    "runBase64ForUserID":{int(x): {
+                        "request": base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getRequest())),
+                        "response": base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getResponse()))}
+                        for x in messageEntry._userRuns.keys()},
+                    "runResultForRoleID":messageEntry._roleResults
                 })
 
         stateDict["arrayOfChains"] = []
