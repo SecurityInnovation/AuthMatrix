@@ -772,12 +772,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     response = StringUtil.fromBytes(response)
                     for c in self._db.getActiveChainIndexes():
                         chain = self._db.arrayOfChains[c]
-                        if chain._fromID == str(messageIndex) and chain._enabled:
+                        # TODO check if fromID is a SUT with prefix
+                        if str(chain._fromID) == str(messageIndex) and chain._enabled:
                             # If a sourceUser is set, replace for all users' chain results
                             # Else, replace each user's chain results individually
                             replace = True
                             affectedUsers = [userEntry]
-                            if chain._sourceUser:
+                            if chain._sourceUser >= 0:
                                 if str(chain._sourceUser) == str(userIndex):
                                     affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
                                 else:
@@ -1818,11 +1819,11 @@ class ChainTableModel(AbstractTableModel):
         elif columnIndex == 2:
             return "SRC - User"
         elif columnIndex == 3:
-            return "SRC - Message ID"
+            return "SRC - Request ID"
         elif columnIndex == 4:
             return "Regex - Extract from HTTP Response"
         elif columnIndex == 5:
-            return "DEST - Message ID(s)"
+            return "DEST - Request ID(s)"
         elif columnIndex == 6:
             return "Regex - Replace into HTTP Request"
         return ""
@@ -1843,7 +1844,11 @@ class ChainTableModel(AbstractTableModel):
                 else:
                     return "None (Default)"
             elif columnIndex == 3:
-                return chainEntry._fromID
+                if chainEntry._fromID.isdigit() and int(chainEntry._fromID) in self._db.getActiveMessageIndexes():
+                    return chainEntry._fromID
+                else:
+                    # TODO check if its a static user token via prefix SUT
+                    return ""
             elif columnIndex == 4:
                 return chainEntry._fromRegex
             elif columnIndex == 5:
@@ -1872,7 +1877,11 @@ class ChainTableModel(AbstractTableModel):
                 else:
                     chainEntry._sourceUser = -1
             elif col == 3:
-                chainEntry._fromID = val
+                if str(val).isdigit():
+                    chainEntry._fromID = str(val)
+                else:
+                    # TODO parse val and determine if it's a static user token
+                    chainEntry._fromID = ""
             elif col == 4:
                 chainEntry._fromRegex = val
             elif col == 5:
@@ -1915,19 +1924,23 @@ class ChainTable(JTable):
             usersComboBoxEditor = DefaultCellEditor(usersComboBox)
             self.getColumnModel().getColumn(2).setCellEditor(usersComboBoxEditor)
 
+            sources = self.getModel()._db.getActiveMessageIndexes() # TODO add static user tokens
+            sourcesComboBox = JComboBox(sources)
+            sourcesComboBoxEditor = DefaultCellEditor(sourcesComboBox)
+            self.getColumnModel().getColumn(3).setCellEditor(sourcesComboBoxEditor)
 
             # Resize
             self.getColumnModel().getColumn(0).setMinWidth(60);
             self.getColumnModel().getColumn(0).setMaxWidth(60);
             self.getColumnModel().getColumn(1).setMinWidth(120);
             self.getColumnModel().getColumn(1).setMaxWidth(240);
-            self.getColumnModel().getColumn(2).setMinWidth(160);
-            self.getColumnModel().getColumn(2).setMaxWidth(160);        
-            self.getColumnModel().getColumn(3).setMinWidth(150);
-            self.getColumnModel().getColumn(3).setMaxWidth(150);        
+            self.getColumnModel().getColumn(2).setMinWidth(130);
+            self.getColumnModel().getColumn(2).setMaxWidth(130);        
+            self.getColumnModel().getColumn(3).setMinWidth(130);
+            self.getColumnModel().getColumn(3).setMaxWidth(130);        
             self.getColumnModel().getColumn(4).setMinWidth(180);
-            self.getColumnModel().getColumn(5).setMinWidth(150);
-            self.getColumnModel().getColumn(5).setMaxWidth(150);        
+            self.getColumnModel().getColumn(5).setMinWidth(140);
+            self.getColumnModel().getColumn(5).setMaxWidth(140);        
             self.getColumnModel().getColumn(6).setMinWidth(180);
 
 
@@ -2153,7 +2166,7 @@ class RoleEntry:
 
 class ChainEntry:
 
-    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser="", enabled=False):
+    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser=-1, enabled=False):
         self._index = index
         self._fromID = fromID
         self._fromRegex = fromRegex
