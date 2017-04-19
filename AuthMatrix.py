@@ -39,6 +39,8 @@ from javax.swing import JTable;
 from javax.swing import JOptionPane;
 from javax.swing import JMenuItem;
 from javax.swing import JCheckBox;
+from javax.swing import JComboBox;
+from javax.swing import DefaultCellEditor;
 from javax.swing import JLabel;
 from javax.swing import JFileChooser;
 from javax.swing import JPopupMenu;
@@ -102,14 +104,18 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._selectedColumn = -1
         self._selectedRow = -1
 
+        # Table of Chain entries (NOTE: must be instantiated before userTable since its referenced)
+        self._chainTable = ChainTable(model = ChainTableModel(self))
+        chainScrollPane = JScrollPane(self._chainTable)
+        self._chainTable.redrawTable()
 
         # Table of User entries
-        self._userTable = UserTable(UserTableModel(self._db))
+        self._userTable = UserTable(model = UserTableModel(self))
         roleScrollPane = JScrollPane(self._userTable)
         self._userTable.redrawTable()
 
         # Table of Request (AKA Message) entries
-        self._messageTable = MessageTable(self, model = MessageTableModel(self._db))
+        self._messageTable = MessageTable(model = MessageTableModel(self))
         messageScrollPane = JScrollPane(self._messageTable)
         self._messageTable.redrawTable()
 
@@ -118,10 +124,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._messageTable.setDropMode(DropMode.INSERT_ROWS)
         self._messageTable.setTransferHandler(MessageTableRowTransferHandler(self._messageTable))                
 
-        # Table of Chain entries
-        self._chainTable = ChainTable(model = ChainTableModel(self._db))
-        chainScrollPane = JScrollPane(self._chainTable)
-        self._chainTable.redrawTable()
+
+
 
 
         # Semi-Generic Popup stuff
@@ -174,6 +178,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         selfExtender._db.deleteMessage(i)
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
+                    selfExtender._chainTable.redrawTable()
 
         class actionRemoveUser(ActionListener):
             def actionPerformed(self,e):
@@ -186,6 +191,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         selfExtender._db.deleteUser(i)
                     selfExtender._selectedColumn = -1
                     selfExtender._userTable.redrawTable()
+                    selfExtender._chainTable.redrawTable()
 
         class actionRemoveChain(ActionListener):
             def actionPerformed(self,e):
@@ -405,6 +411,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 messageIndex = self._db.createNewMessage(self._callbacks.saveBuffersToTempFiles(messageInfo), name)
                 #self._messageTable.getModel().addRow(row)
             self._messageTable.redrawTable()
+            self._chainTable.redrawTable()
 
         class UserCookiesActionListener(ActionListener):
             def __init__(self, currentUser, extender):
@@ -488,6 +495,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         if not newUser is None:
             self._db.getOrCreateUser(newUser)
             self._userTable.redrawTable()
+            self._chainTable.redrawTable()
 
     def getInputRoleClick(self, e):
         newRole = JOptionPane.showInputDialog(self._splitpane,"Enter New Role:")
@@ -1075,7 +1083,7 @@ class MatrixDB():
             self.arrayOfChains.add(ChainEntry(
                 chainIndex,
                 chainIndex - self.deletedChainCount,
-                "[Sample Chain]",
+                "Example",
                 "1",
                 "StartAfter(.*?)EndAt",
                 "2,4-6",
@@ -1491,8 +1499,9 @@ class MatrixDB():
     
 class UserTableModel(AbstractTableModel):
 
-    def __init__(self, db):
-        self._db = db
+    def __init__(self, extender):
+        self._extender = extender
+        self._db = extender._db
 
     def getRowCount(self):
         return self._db.getActiveUserCount()
@@ -1561,6 +1570,8 @@ class UserTableModel(AbstractTableModel):
                 userEntry.addRoleByIndex(roleIndex, val)
 
         self.fireTableCellUpdated(row,col)
+        # Refresh dropdown menu for Chains
+        self._extender._chainTable.redrawTable()
 
     # Set checkboxes and role editable
     def isCellEditable(self, row, col):
@@ -1614,8 +1625,9 @@ class UserTable(JTable):
 
 class MessageTableModel(AbstractTableModel):
 
-    def __init__(self, db):
-        self._db = db
+    def __init__(self, extender):
+        self._extender = extender
+        self._db = extender._db
 
     def getRowCount(self):
         return self._db.getActiveMessageCount()
@@ -1697,9 +1709,9 @@ class MessageTableModel(AbstractTableModel):
 
 class MessageTable(JTable):
 
-    def __init__(self, extender, model):
-        self._extender = extender
+    def __init__(self, model):
         self.setModel(model)
+        self._extender = model._extender
         self._viewerMap = {}
         return
     
@@ -1782,8 +1794,9 @@ class MessageTable(JTable):
 
 class ChainTableModel(AbstractTableModel):
 
-    def __init__(self, db):
-        self._db = db
+    def __init__(self, extender):
+        self._extender = extender
+        self._db = extender._db
 
     def getRowCount(self):
         return self._db.getActiveChainCount()
@@ -1803,9 +1816,9 @@ class ChainTableModel(AbstractTableModel):
         elif columnIndex == 1:
             return "Chain Name"
         elif columnIndex == 2:
-            return "SRC - Message ID"
+            return "SRC - User"
         elif columnIndex == 3:
-            return "SRC - User ID (Pitchfork Mode)" # TODO Rename
+            return "SRC - Message ID"
         elif columnIndex == 4:
             return "Regex - Extract from HTTP Response"
         elif columnIndex == 5:
@@ -1825,9 +1838,12 @@ class ChainTableModel(AbstractTableModel):
             elif columnIndex == 1:
                 return chainEntry._name
             elif columnIndex == 2:
-                return chainEntry._fromID
+                if chainEntry._sourceUser in self._db.getActiveUserIndexes():
+                    return self._db.arrayOfUsers[chainEntry._sourceUser]._name
+                else:
+                    return "None (Default)"
             elif columnIndex == 3:
-                return chainEntry._sourceUser
+                return chainEntry._fromID
             elif columnIndex == 4:
                 return chainEntry._fromRegex
             elif columnIndex == 5:
@@ -1850,9 +1866,13 @@ class ChainTableModel(AbstractTableModel):
             elif col == 1:
                 chainEntry._name = val
             elif col == 2:
-                chainEntry._fromID = val
+                user = self._db.getUserByName(val)
+                if user:
+                    chainEntry._sourceUser = user._index
+                else:
+                    chainEntry._sourceUser = -1
             elif col == 3:
-                chainEntry._sourceUser = val
+                chainEntry._fromID = val
             elif col == 4:
                 chainEntry._fromRegex = val
             elif col == 5:
@@ -1884,17 +1904,27 @@ class ChainTable(JTable):
         self.getModel().fireTableStructureChanged()
         self.getModel().fireTableDataChanged()
         
-        # Resize
+
+
 
         if self.getModel().getColumnCount() > 1:
+
+            # Comboboxes
+            users = ["None (Default)"]+[self.getModel()._db.arrayOfUsers[x]._name for x in self.getModel()._db.getActiveUserIndexes()]
+            usersComboBox = JComboBox(users)
+            usersComboBoxEditor = DefaultCellEditor(usersComboBox)
+            self.getColumnModel().getColumn(2).setCellEditor(usersComboBoxEditor)
+
+
+            # Resize
             self.getColumnModel().getColumn(0).setMinWidth(60);
             self.getColumnModel().getColumn(0).setMaxWidth(60);
             self.getColumnModel().getColumn(1).setMinWidth(120);
             self.getColumnModel().getColumn(1).setMaxWidth(240);
-            self.getColumnModel().getColumn(2).setMinWidth(150);
-            self.getColumnModel().getColumn(2).setMaxWidth(150);        
-            self.getColumnModel().getColumn(3).setMinWidth(210);
-            self.getColumnModel().getColumn(3).setMaxWidth(210);        
+            self.getColumnModel().getColumn(2).setMinWidth(160);
+            self.getColumnModel().getColumn(2).setMaxWidth(160);        
+            self.getColumnModel().getColumn(3).setMinWidth(150);
+            self.getColumnModel().getColumn(3).setMaxWidth(150);        
             self.getColumnModel().getColumn(4).setMinWidth(180);
             self.getColumnModel().getColumn(5).setMinWidth(150);
             self.getColumnModel().getColumn(5).setMaxWidth(150);        
