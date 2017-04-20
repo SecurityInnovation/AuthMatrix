@@ -49,11 +49,14 @@ from javax.swing import TransferHandler;
 from javax.swing import DropMode;
 from javax.swing import JSeparator;
 from javax.swing import SwingConstants;
+from javax.swing import JList
+from javax.swing import AbstractCellEditor
 from java.awt.datatransfer import StringSelection;
 from java.awt.datatransfer import DataFlavor;
 from javax.swing.table import AbstractTableModel;
 from javax.swing.table import TableCellRenderer;
 from javax.swing.table import JTableHeader;
+from javax.swing.table import TableCellEditor
 from java.awt import Color;
 from java.awt import Font;
 from java.awt.event import MouseAdapter;
@@ -76,7 +79,7 @@ import random
 import string
 
 
-AUTHMATRIX_VERSION = "0.6.3"
+AUTHMATRIX_VERSION = "0.7"
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
     
@@ -408,6 +411,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 # TODO maybe replace with RequestResponseStored?
                 requestInfo = self._helpers.analyzeRequest(messageInfo)
                 name = str(requestInfo.getMethod()).ljust(8) + requestInfo.getUrl().getPath()
+                # TODO infer regex from messagebuffer response
                 messageIndex = self._db.createNewMessage(self._callbacks.saveBuffersToTempFiles(messageInfo), name)
                 #self._messageTable.getModel().addRow(row)
             self._messageTable.redrawTable()
@@ -778,7 +782,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             # Else, replace each user's chain results individually
                             replace = True
                             affectedUsers = [userEntry]
-                            if chain._sourceUser >= 0:
+                            if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0:
                                 if str(chain._sourceUser) == str(userIndex):
                                     affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
                                 else:
@@ -1064,10 +1068,10 @@ class MatrixDB():
 
     # Returns the Row of the new message
     # Unlike Users and Roles, allow duplicate messages
-    def createNewMessage(self,messagebuffer,name):
+    def createNewMessage(self,messagebuffer,name,regex="^HTTP/1\\.1 200 OK"):
         self.lock.acquire()
         messageIndex = self.arrayOfMessages.size()
-        self.arrayOfMessages.add(MessageEntry(messageIndex, messageIndex - self.deletedMessageCount, messagebuffer, name))
+        self.arrayOfMessages.add(MessageEntry(messageIndex, messageIndex - self.deletedMessageCount, messagebuffer, name, regex=regex))
 
         # Add all existing roles as unchecked
         for roleIndex in self.getActiveRoleIndexes():
@@ -1085,9 +1089,9 @@ class MatrixDB():
                 chainIndex,
                 chainIndex - self.deletedChainCount,
                 "Example",
-                "1",
+                "",
                 "StartAfter(.*?)EndAt",
-                "2,4-6",
+                "",
                 "StartAfter(.*?)EndAt"))
         else:
             self.arrayOfChains.add(ChainEntry(chainIndex, chainIndex - self.deletedChainCount))
@@ -1211,7 +1215,7 @@ class MatrixDB():
 
         stateDict = json.loads(jsonFixed)
 
-        if stateDict["version"] != AUTHMATRIX_VERSION:
+        if stateDict["version"] > AUTHMATRIX_VERSION:
             print "Invalid Version in State File ("+stateDict["version"]+")"
             return
 
@@ -1798,7 +1802,7 @@ class ChainTableModel(AbstractTableModel):
     def __init__(self, extender):
         self._extender = extender
         self._db = extender._db
-        self.rPrefix = "Request #"
+        self.rPrefix = "Request "
         self.chainFromDefault = "All Users (Default)"
 
     def getRowCount(self):
@@ -1856,6 +1860,10 @@ class ChainTableModel(AbstractTableModel):
                 if chainEntry._sourceUser in self._db.getActiveUserIndexes():
                     return self._db.arrayOfUsers[chainEntry._sourceUser]._name
                 else:
+                    # NOTE: This is not necessary, but leaving in incase it's necessary for version consistency
+                    #if chainEntry._sourceUser != -1:
+                    #    print "Warning: source user is in invalid state: "+str(chainEntry._sourceUser)
+                    #    chainEntry._sourceUser = -1
                     return self.chainFromDefault
         return ""
 
@@ -1920,16 +1928,65 @@ class ChainTable(JTable):
 
         if self.getModel().getColumnCount() > 1:
 
+            db = self.getModel()._db
+
             # Comboboxes
-            users = [self.getModel().chainFromDefault]+[self.getModel()._db.arrayOfUsers[x]._name for x in self.getModel()._db.getActiveUserIndexes()]
+            users = [self.getModel().chainFromDefault]+[db.arrayOfUsers[x]._name for x in db.getActiveUserIndexes()]
             usersComboBox = JComboBox(users)
             usersComboBoxEditor = DefaultCellEditor(usersComboBox)
             self.getColumnModel().getColumn(6).setCellEditor(usersComboBoxEditor)
 
-            sources = [self.getModel().rPrefix+str(x) for x in self.getModel()._db.getActiveMessageIndexes()] # TODO add static user tokens
+            sources = [self.getModel().rPrefix+str(x) for x in db.getActiveMessageIndexes()] # TODO add static user tokens
             sourcesComboBox = JComboBox(sources)
             sourcesComboBoxEditor = DefaultCellEditor(sourcesComboBox)
             self.getColumnModel().getColumn(2).setCellEditor(sourcesComboBoxEditor)
+
+            # Popup editor for DEST IDs
+            class DestinationCellEditor(AbstractCellEditor, TableCellEditor, ActionListener):
+                # https://stackoverflow.com/questions/14153544/jtable-how-to-update-cell-using-custom-editor-by-pop-up-input-dialog-box
+                self.scrollablePane = JScrollPane()
+                self.destList = JList()
+                self.button = JButton()
+                self.oldVal = ""
+
+                def actionPerformed(self,e):
+                    JOptionPane.showMessageDialog(self.button,self.scrollablePane,"Select All Request IDs",JOptionPane.PLAIN_MESSAGE)                    
+                    self.fireEditingStopped()
+
+                def getTableCellEditorComponent(self,table,value,isSelected,rowIndex,vColIndex):
+                    self.oldVal = value
+                    dests = db.getActiveMessageIndexes()
+                    if dests:
+                        self.destList = JList(dests)
+                        self.destList.setVisibleRowCount(10)
+                        self.scrollablePane = JScrollPane(self.destList)
+    
+                        self.button = JButton()
+                        self.button.setBorderPainted(False)
+                        self.button.setOpaque(False)
+                        self.button.setContentAreaFilled(False)
+                        
+                        self.button.addActionListener(self)
+                        return self.button
+                    
+
+                def getCellEditorValue(self):
+                    newValues = self.destList.getSelectedValuesList()
+                    if not newValues:
+                        return self.oldVal
+                    return self.listToRanges(newValues)
+
+                # Convert a list of ints into a range string
+                def listToRanges(self, intList):
+                    ret = []
+                    for val in sorted(intList):
+                        if not ret or ret[-1][-1]+1 != val:
+                            ret.append([val])
+                        else:
+                            ret[-1].append(val)
+                    return ",".join([str(x[0]) if len(x)==1 else str(x[0])+"-"+str(x[-1]) for x in ret])
+
+            self.getColumnModel().getColumn(4).setCellEditor(DestinationCellEditor())
 
             # Resize
             self.getColumnModel().getColumn(0).setMinWidth(60);
@@ -2053,7 +2110,7 @@ class RegexRenderer(JLabel, TableCellRenderer):
 
 class MessageEntry:
 
-    def __init__(self, index, tableRow, requestResponse, name = "", roles = {}, regex = "^HTTP/1\\.1 200 OK", deleted = False, failureRegexMode = False):
+    def __init__(self, index, tableRow, requestResponse, name = "", roles = {}, regex = "", deleted = False, failureRegexMode = False):
         self._index = index
         self._tableRow = tableRow
         self._requestResponse = requestResponse
