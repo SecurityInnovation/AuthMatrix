@@ -1798,6 +1798,8 @@ class ChainTableModel(AbstractTableModel):
     def __init__(self, extender):
         self._extender = extender
         self._db = extender._db
+        self.rPrefix = "Request #"
+        self.chainFromDefault = "All Users (Default)"
 
     def getRowCount(self):
         return self._db.getActiveChainCount()
@@ -1817,15 +1819,15 @@ class ChainTableModel(AbstractTableModel):
         elif columnIndex == 1:
             return "Chain Name"
         elif columnIndex == 2:
-            return "SRC - User"
+            return "Source"
         elif columnIndex == 3:
-            return "SRC - Request ID"
-        elif columnIndex == 4:
             return "Regex - Extract from HTTP Response"
-        elif columnIndex == 5:
+        elif columnIndex == 4:
             return "DEST - Request ID(s)"
-        elif columnIndex == 6:
+        elif columnIndex == 5:
             return "Regex - Replace into HTTP Request"
+        elif columnIndex == 6:
+            return "Chain Values From:"
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
@@ -1839,22 +1841,22 @@ class ChainTableModel(AbstractTableModel):
             elif columnIndex == 1:
                 return chainEntry._name
             elif columnIndex == 2:
-                if chainEntry._sourceUser in self._db.getActiveUserIndexes():
-                    return self._db.arrayOfUsers[chainEntry._sourceUser]._name
-                else:
-                    return "None (Default)"
-            elif columnIndex == 3:
                 if chainEntry._fromID.isdigit() and int(chainEntry._fromID) in self._db.getActiveMessageIndexes():
-                    return chainEntry._fromID
+                    return self.rPrefix+chainEntry._fromID
                 else:
                     # TODO check if its a static user token via prefix SUT
                     return ""
-            elif columnIndex == 4:
+            elif columnIndex == 3:
                 return chainEntry._fromRegex
-            elif columnIndex == 5:
+            elif columnIndex == 4:
                 return chainEntry._toID
-            elif columnIndex == 6:
+            elif columnIndex == 5:
                 return chainEntry._toRegex
+            elif columnIndex == 6:
+                if chainEntry._sourceUser in self._db.getActiveUserIndexes():
+                    return self._db.arrayOfUsers[chainEntry._sourceUser]._name
+                else:
+                    return self.chainFromDefault
         return ""
 
     def addRow(self, row):
@@ -1871,23 +1873,23 @@ class ChainTableModel(AbstractTableModel):
             elif col == 1:
                 chainEntry._name = val
             elif col == 2:
+                if val and self.rPrefix in val and val[len(self.rPrefix):].isdigit():
+                    chainEntry._fromID = val[len(self.rPrefix):]
+                else:
+                    # TODO parse val and determine if it's a static user token
+                    chainEntry._fromID = ""
+            elif col == 3:
+                chainEntry._fromRegex = val
+            elif col == 4:
+                chainEntry._toID = val
+            elif col == 5:
+                chainEntry._toRegex = val
+            elif col == 6:
                 user = self._db.getUserByName(val)
                 if user:
                     chainEntry._sourceUser = user._index
                 else:
                     chainEntry._sourceUser = -1
-            elif col == 3:
-                if str(val).isdigit():
-                    chainEntry._fromID = str(val)
-                else:
-                    # TODO parse val and determine if it's a static user token
-                    chainEntry._fromID = ""
-            elif col == 4:
-                chainEntry._fromRegex = val
-            elif col == 5:
-                chainEntry._toID = val
-            elif col == 6:
-                chainEntry._toRegex = val
 
 
     def isCellEditable(self, row, col):
@@ -1919,29 +1921,29 @@ class ChainTable(JTable):
         if self.getModel().getColumnCount() > 1:
 
             # Comboboxes
-            users = ["None (Default)"]+[self.getModel()._db.arrayOfUsers[x]._name for x in self.getModel()._db.getActiveUserIndexes()]
+            users = [self.getModel().chainFromDefault]+[self.getModel()._db.arrayOfUsers[x]._name for x in self.getModel()._db.getActiveUserIndexes()]
             usersComboBox = JComboBox(users)
             usersComboBoxEditor = DefaultCellEditor(usersComboBox)
-            self.getColumnModel().getColumn(2).setCellEditor(usersComboBoxEditor)
+            self.getColumnModel().getColumn(6).setCellEditor(usersComboBoxEditor)
 
-            sources = self.getModel()._db.getActiveMessageIndexes() # TODO add static user tokens
+            sources = [self.getModel().rPrefix+str(x) for x in self.getModel()._db.getActiveMessageIndexes()] # TODO add static user tokens
             sourcesComboBox = JComboBox(sources)
             sourcesComboBoxEditor = DefaultCellEditor(sourcesComboBox)
-            self.getColumnModel().getColumn(3).setCellEditor(sourcesComboBoxEditor)
+            self.getColumnModel().getColumn(2).setCellEditor(sourcesComboBoxEditor)
 
             # Resize
             self.getColumnModel().getColumn(0).setMinWidth(60);
             self.getColumnModel().getColumn(0).setMaxWidth(60);
             self.getColumnModel().getColumn(1).setMinWidth(120);
             self.getColumnModel().getColumn(1).setMaxWidth(240);
-            self.getColumnModel().getColumn(2).setMinWidth(130);
-            self.getColumnModel().getColumn(2).setMaxWidth(130);        
-            self.getColumnModel().getColumn(3).setMinWidth(130);
-            self.getColumnModel().getColumn(3).setMaxWidth(130);        
-            self.getColumnModel().getColumn(4).setMinWidth(180);
-            self.getColumnModel().getColumn(5).setMinWidth(140);
-            self.getColumnModel().getColumn(5).setMaxWidth(140);        
-            self.getColumnModel().getColumn(6).setMinWidth(180);
+            self.getColumnModel().getColumn(2).setMinWidth(115);
+            self.getColumnModel().getColumn(2).setMaxWidth(115);        
+            self.getColumnModel().getColumn(3).setMinWidth(180);
+            self.getColumnModel().getColumn(4).setMinWidth(160);
+            self.getColumnModel().getColumn(4).setMaxWidth(160);        
+            self.getColumnModel().getColumn(5).setMinWidth(180);
+            self.getColumnModel().getColumn(6).setMinWidth(150);
+            self.getColumnModel().getColumn(6).setMaxWidth(150);        
 
 
 # For color-coding checkboxes in the message table
