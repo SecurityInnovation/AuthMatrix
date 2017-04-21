@@ -466,8 +466,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
             if len(messages)==1:
                 # Send cookies to user:
-                for i in self._db.getActiveUserIndexes():
-                    user = self._db.arrayOfUsers[i]
+                for user in [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]:
                     menuItem = JMenuItem("Send cookies to AuthMatrix user: "+user._name);
                     menuItem.addActionListener(UserCookiesActionListener(user, self))
                     ret.append(menuItem)
@@ -789,8 +788,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     print "ERROR: No HTTP Response (Likely Invalid Target Host)"
                 else:
                     response = StringUtil.fromBytes(response)
-                    for c in self._db.getActiveChainIndexes():
-                        chain = self._db.arrayOfChains[c]
+                    for chain in [self._db.arrayOfChains[c] for c in self._db.getActiveChainIndexes()]:
                         # TODO check if fromID is a SUT with prefix
                         if str(chain._fromID) == str(messageIndex) and chain._enabled:
                             # If a sourceUser is set, replace for all users' chain results
@@ -830,8 +828,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._messageTable.redrawTable()
 
     def checkResult(self, messageEntry, roleIndex, activeCheckBoxedRoles):
-        for userIndex in self._db.getActiveUserIndexes():
-            userEntry = self._db.arrayOfUsers[userIndex]
+        for userEntry in [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]:
 
             ignoreUser = False
 
@@ -1352,14 +1349,18 @@ class MatrixDB():
         "deletedMessageCount":self.deletedMessageCount,
         "deletedChainCount":self.deletedChainCount}
 
+        # TODO potentially check if deleted and save empty fields for the rest
+        # Will need to still save an object for each one so that the arrays match the indexes on load
+
         stateDict["arrayOfRoles"] = []
         for roleEntry in self.arrayOfRoles:
+            deleted = roleEntry._deleted
             stateDict["arrayOfRoles"].append({
                     "index":roleEntry._index,
-                    "name":roleEntry._name,
-                    "deleted":roleEntry._deleted,
-                    "column":roleEntry._column,
-                    "singleUser":roleEntry._singleUser
+                    "name":roleEntry._name if not deleted else "",
+                    "deleted":deleted,
+                    "column":roleEntry._column if not deleted else -1,
+                    "singleUser":roleEntry._singleUser if not deleted else False
                 })
 
         stateDict["arrayOfUsers"] = []
@@ -1436,42 +1437,49 @@ class MatrixDB():
         return [x._index for x in self.arrayOfChains if not x.isDeleted()]        
 
     def getActiveUserCount(self):
-        return self.arrayOfUsers.size()-self.deletedUserCount
+        ret = self.arrayOfUsers.size()-self.deletedUserCount
+        assert(ret == len(self.getActiveUserIndexes()))
+        return ret
 
     def getActiveRoleCount(self):
-        return self.arrayOfRoles.size()-self.deletedRoleCount
+        ret = self.arrayOfRoles.size()-self.deletedRoleCount
+        assert(ret == len(self.getActiveRoleIndexes()))
+        return ret
+
+    def getActiveMessageCount(self):
+        ret = self.arrayOfMessages.size()-self.deletedMessageCount
+        assert(ret == len(self.getActiveMessageIndexes()))
+        return ret
 
 
     def getActiveSingleUserRoleCount(self):
         return len(self.getActiveSingleUserRoleIndexes())
 
 
-    def getActiveMessageCount(self):
-        return self.arrayOfMessages.size()-self.deletedMessageCount
-
     def getActiveChainCount(self):
         return self.arrayOfChains.size()-self.deletedChainCount    
 
     def getMessageByRow(self, row):
-        for m in self.arrayOfMessages:
-            if not m.isDeleted() and m.getTableRow() == row:
-                return m
+        for messageEntry in [self.arrayOfMessages[i] for i in self.getActiveMessageIndexes()]:
+            if messageEntry.getTableRow() == row:
+                return messageEntry
 
     def getUserByRow(self, row):
-        for u in self.arrayOfUsers:
-            if not u.isDeleted() and u.getTableRow() == row:
-                return u
+        for userEntry in [self.arrayOfUsers[i] for i in self.getActiveUserIndexes()]:
+            if userEntry.getTableRow() == row:
+                return userEntry
 
     def getRoleByColumn(self,column, table):
-        staticcount = self.STATIC_MESSAGE_TABLE_COLUMN_COUNT if table == "m" else self.STATIC_USER_TABLE_COLUMN_COUNT
-        for r in self.arrayOfRoles:
-            if not r.isDeleted() and r.getColumn()+staticcount == column:
-                return r
+        # TODO will need to update this when the user table has static values
+        startingIndex = self.STATIC_MESSAGE_TABLE_COLUMN_COUNT if table == "m" else self.STATIC_USER_TABLE_COLUMN_COUNT
+        for roleEntry in [self.arrayOfRoles[i] for i in self.getActiveRoleIndexes()]:
+            if roleEntry.getColumn()+startingIndex == column:
+                return roleEntry
 
     def getChainByRow(self, row):
-        for c in self.arrayOfChains:
-            if not c.isDeleted() and c.getTableRow() == row:
-                return c
+        for chainEntry in [self.arrayOfChains[i] for i in self.getActiveChainIndexes()]:
+            if chainEntry.getTableRow() == row:
+                return chainEntry
 
     def deleteUser(self,userIndex):
         self.lock.acquire()
@@ -1481,12 +1489,11 @@ class MatrixDB():
             self.deletedUserCount += 1
 
             previousRow = userEntry.getTableRow()
-            for i in self.getActiveUserIndexes():
-                user = self.arrayOfUsers[i]
+            for user in [self.arrayOfUsers[i] for i in self.getActiveUserIndexes()]:
                 if user.getTableRow()>previousRow:
                     user.setTableRow(user.getTableRow()-1)
 
-            # TODO delete SingleUser role too
+            # TODO maybe delete SingleUser role too (though it might be worth leaving if the user has boxes checked)
 
         self.lock.release()
 
@@ -1498,8 +1505,7 @@ class MatrixDB():
             self.deletedRoleCount += 1
 
             previousColumn = roleEntry.getColumn()
-            for i in self.getActiveRoleIndexes():
-                role = self.arrayOfRoles[i]
+            for role in [self.arrayOfRoles[i] for i in self.getActiveRoleIndexes()]:
                 if role.getColumn()>previousColumn:
                     role.setColumn(role.getColumn()-1)
 
@@ -1513,8 +1519,7 @@ class MatrixDB():
             self.deletedMessageCount += 1
 
             previousRow = messageEntry.getTableRow()
-            for i in self.getActiveMessageIndexes():
-                message = self.arrayOfMessages[i]
+            for message in [self.arrayOfMessages[i] for i in self.getActiveMessageIndexes()]:
                 if message.getTableRow()>previousRow:
                     message.setTableRow(message.getTableRow()-1)
 
@@ -1528,8 +1533,7 @@ class MatrixDB():
             self.deletedChainCount += 1
 
             previousRow = chainEntry.getTableRow()
-            for i in self.getActiveChainIndexes():
-                chain = self.arrayOfChains[i]
+            for chain in [self.arrayOfChains[i] for i in self.getActiveChainIndexes()]:
                 if chain.getTableRow()>previousRow:
                     chain.setTableRow(chain.getTableRow()-1)
 
