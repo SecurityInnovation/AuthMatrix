@@ -411,9 +411,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 # TODO maybe replace with RequestResponseStored?
                 requestInfo = self._helpers.analyzeRequest(messageInfo)
                 name = str(requestInfo.getMethod()).ljust(8) + requestInfo.getUrl().getPath()
-                # TODO infer regex from messagebuffer response
-                messageIndex = self._db.createNewMessage(self._callbacks.saveBuffersToTempFiles(messageInfo), name)
-                #self._messageTable.getModel().addRow(row)
+                # Grab regex from response
+                regex = "^HTTP/1\\.1 200 OK"
+                response = messageInfo.getResponse()
+                if response:
+                    responseInfo=self._helpers.analyzeResponse(response)
+                    if len(responseInfo.getHeaders()):
+                        responseCodeHeader = responseInfo.getHeaders()[0]
+                        regex = "^"+re.escape(responseCodeHeader)
+                messageIndex = self._db.createNewMessage(self._callbacks.saveBuffersToTempFiles(messageInfo), name, regex)
             self._messageTable.redrawTable()
             self._chainTable.redrawTable()
 
@@ -1068,7 +1074,7 @@ class MatrixDB():
 
     # Returns the Row of the new message
     # Unlike Users and Roles, allow duplicate messages
-    def createNewMessage(self,messagebuffer,name,regex="^HTTP/1\\.1 200 OK"):
+    def createNewMessage(self,messagebuffer,name,regex):
         self.lock.acquire()
         messageIndex = self.arrayOfMessages.size()
         self.arrayOfMessages.add(MessageEntry(messageIndex, messageIndex - self.deletedMessageCount, messagebuffer, name, regex=regex))
