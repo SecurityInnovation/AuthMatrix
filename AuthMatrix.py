@@ -505,6 +505,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         if not newUser is None:
             self._db.getOrCreateUser(newUser)
             self._userTable.redrawTable()
+            self._messageTable.redrawTable()
             self._chainTable.redrawTable()
 
     def getInputRoleClick(self, e):
@@ -550,7 +551,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
             Load Selected File?
             """
-            result = JOptionPane.showOptionDialog(self._splitpane, warning, "Caution", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE, None, ["OK", "Cancel"],"OK")
+            result = JOptionPane.showOptionDialog(self._splitpane, 
+                warning, "Caution", 
+                JOptionPane.YES_NO_OPTION, 
+                JOptionPane.WARNING_MESSAGE, 
+                None, 
+                ["OK", "Cancel"],
+                "OK")
+
             if result != JOptionPane.YES_OPTION:
                 return
             f = self._fc.getSelectedFile()
@@ -561,6 +569,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             filein.close()
             # Check if using on older state file compatible with v0.5.2 or greater
             if not jsonText or jsonText[0] !="{":
+                # TODO move warning only to here and clarify its for the old versions
                 self._db.loadLegacy(fileName,self)
             else:
                 self._db.loadJson(jsonText,self)
@@ -1039,31 +1048,63 @@ class MatrixDB():
                 userIndex - self.deletedUserCount,
                 name))
 
-            # Add all existing roles as unchecked
+            # Add SingleUser Role
+            self.lock.release()
+            singleRoleIndex = self.getOrCreateRole(name, True)
+            self.lock.acquire()
+            # Check Role for user
+
+            # Add all existing roles as unchecked except the singleUser
             for roleIndex in self.getActiveRoleIndexes():
-                self.arrayOfUsers[userIndex].addRoleByIndex(roleIndex)
+                prechecked=False
+                if roleIndex == singleRoleIndex:
+                    prechecked=True
+                self.arrayOfUsers[userIndex].addRoleByIndex(roleIndex,prechecked)
 
         self.lock.release()
         return userIndex
 
     # Returns the index of the role, whether its new or not
-    def getOrCreateRole(self, role):
+    def getOrCreateRole(self, role, newSingleUser=False):
         self.lock.acquire()
         roleIndex = -1
+
+        suffix = " (only)"
+        name = role+suffix if newSingleUser else role
+        if newSingleUser or name.endswith(suffix):
+            singleUser = True
+        else:
+            singleUser = False
+
         # Check if Role already exists
         for i in self.getActiveRoleIndexes():
-            if self.arrayOfRoles[i]._name == role:
+            if self.arrayOfRoles[i]._name == name:
                 roleIndex = i
         # Add new Role
         if roleIndex < 0:
             roleIndex = self.arrayOfRoles.size()
-            self.arrayOfRoles.add(RoleEntry(roleIndex,
-                roleIndex - self.deletedRoleCount,
-                role))
+            newColumn = roleIndex-self.deletedRoleCount
 
-            # Add new role to each existing user as unchecked
+            # Insert column if not singleuser and increment singleuser columns
+            if not singleUser:
+                newColumn -= self.getActiveSingleUserRoleCount()
+                for i in self.getActiveSingleUserRoleIndexes():
+                    # NOTE this must be changed if reordering of roles is added
+                    curColumn = self.arrayOfRoles[i].getColumn()
+                    assert(curColumn >= newColumn)
+                    self.arrayOfRoles[i].setColumn(curColumn+1)
+
+            self.arrayOfRoles.add(RoleEntry(roleIndex,
+                newColumn, 
+                name,
+                singleUser=singleUser))
+
+            # Add new role to each existing user as unchecked except the singleUser
             for userIndex in self.getActiveUserIndexes():
-                self.arrayOfUsers[userIndex].addRoleByIndex(roleIndex)
+                prechecked = False
+                if singleUser and self.arrayOfUsers[userIndex]._name == name[:-len(suffix)]:
+                    prechecked=True                
+                self.arrayOfUsers[userIndex].addRoleByIndex(roleIndex, prechecked)
 
             # Add new role to each existing message as unchecked
             for messageIndex in self.getActiveMessageIndexes():
@@ -1215,14 +1256,16 @@ class MatrixDB():
         self.lock.release()
 
     def loadJson(self, jsonText, extender):
-        # TODO: Weird issue where saving serialized json doesn't use correct capitalization on bools
+        # NOTE: Weird issue where saving serialized json for configs loaded from old states (pre v0.6.3)
+        # doesn't use correct capitalization on bools.
         # This replacement might have weird results, but most are mitigated by using base64 encoding
         jsonFixed = jsonText.replace(": False",": false").replace(": True",": true")
 
         stateDict = json.loads(jsonFixed)
 
-        if stateDict["version"] > AUTHMATRIX_VERSION:
-            print "Invalid Version in State File ("+stateDict["version"]+")"
+        version = stateDict["version"]
+        if version > AUTHMATRIX_VERSION:
+            print "Invalid Version in State File ("+version+")"
             return
 
         self.lock.acquire()
@@ -1236,11 +1279,18 @@ class MatrixDB():
         self.deletedChainCount = stateDict["deletedChainCount"]
 
         for roleEntry in stateDict["arrayOfRoles"]:
+            # Version: singleUser type roles added in v0.7
+            if version < "0.7":
+                singleUser = False
+            else:
+                singleUser = roleEntry["singleUser"]
+
             self.arrayOfRoles.add(RoleEntry(
                 roleEntry["index"],
                 roleEntry["column"],
                 roleEntry["name"],
-                roleEntry["deleted"]))
+                roleEntry["deleted"],
+                singleUser))
 
 
         for userEntry in stateDict["arrayOfUsers"]:
@@ -1254,7 +1304,7 @@ class MatrixDB():
                 base64.b64decode(userEntry["headerBase64"]),
                 base64.b64decode(userEntry["postargsBase64"])))
 
-        # TODO chainResults?
+        # NOTE: leaving out chainResults
         
         for messageEntry in stateDict["arrayOfMessages"]:
             self.arrayOfMessages.add(MessageEntry(
@@ -1288,7 +1338,7 @@ class MatrixDB():
                 chainEntry["enabled"]
                 ))
         
-        # TODO fromStart, fromEnd, toStart, toEnd?
+        # NOTE: leaving out fromStart, fromEnd, toStart, toEnd
 
         self.lock.release()
 
@@ -1308,7 +1358,8 @@ class MatrixDB():
                     "index":roleEntry._index,
                     "name":roleEntry._name,
                     "deleted":roleEntry._deleted,
-                    "column":roleEntry._column
+                    "column":roleEntry._column,
+                    "singleUser":roleEntry._singleUser
                 })
 
         stateDict["arrayOfUsers"] = []
@@ -1375,6 +1426,9 @@ class MatrixDB():
     def getActiveRoleIndexes(self):
         return [x._index for x in self.arrayOfRoles if not x.isDeleted()]
 
+    def getActiveSingleUserRoleIndexes(self):
+        return [x._index for x in self.arrayOfRoles if x.isSingleUser() and not x.isDeleted()]
+
     def getActiveMessageIndexes(self):
         return [x._index for x in self.arrayOfMessages if not x.isDeleted()]
 
@@ -1386,6 +1440,11 @@ class MatrixDB():
 
     def getActiveRoleCount(self):
         return self.arrayOfRoles.size()-self.deletedRoleCount
+
+
+    def getActiveSingleUserRoleCount(self):
+        return len(self.getActiveSingleUserRoleIndexes())
+
 
     def getActiveMessageCount(self):
         return self.arrayOfMessages.size()-self.deletedMessageCount
@@ -1426,6 +1485,8 @@ class MatrixDB():
                 user = self.arrayOfUsers[i]
                 if user.getTableRow()>previousRow:
                     user.setTableRow(user.getTableRow()-1)
+
+            # TODO delete SingleUser role too
 
         self.lock.release()
 
@@ -1518,7 +1579,7 @@ class UserTableModel(AbstractTableModel):
         return self._db.getActiveUserCount()
 
     def getColumnCount(self):
-        return self._db.getActiveRoleCount()+self._db.STATIC_USER_TABLE_COLUMN_COUNT
+        return self._db.getActiveRoleCount()+self._db.STATIC_USER_TABLE_COLUMN_COUNT-self._db.getActiveSingleUserRoleCount()
 
         
     def getColumnName(self, columnIndex):
@@ -1569,7 +1630,10 @@ class UserTableModel(AbstractTableModel):
         userEntry = self._db.getUserByRow(row)
         if userEntry:
             if col == 1:
-                userEntry._name = val
+                # Verify user name does not already exist
+                if not self._db.getUserByName(val):
+                    userEntry._name = val
+                # TODO rename SingleUser role too?
             elif col == 2:
                 userEntry._cookies = val
             elif col == 3:
@@ -1793,7 +1857,9 @@ class MessageTable(JTable):
             if requestViewer and requestViewer.isMessageModified(): # TODO BUG: this doesnt detect change body encoding or change request method
                 messageEntry = self.getModel()._db.arrayOfMessages[messageIndex]
                 newMessage = requestViewer.getMessage()
-                messageEntry._requestResponse = RequestResponseStored(self._extender, request=newMessage, httpService=messageEntry._requestResponse.getHttpService())                
+                messageEntry._requestResponse = RequestResponseStored(self._extender, 
+                    request=newMessage, 
+                    httpService=messageEntry._requestResponse.getHttpService())                
         self._viewerMap = {}
 
 
@@ -2209,11 +2275,12 @@ class UserEntry:
 
 class RoleEntry:
 
-    def __init__(self,index,columnIndex,name,deleted=False):
+    def __init__(self,index,columnIndex,name,deleted=False,singleUser=False):
         self._index = index
         self._name = name
         self._deleted = deleted
         self._column = columnIndex
+        self._singleUser = singleUser
         return
 
     def setDeleted(self):
@@ -2228,6 +2295,9 @@ class RoleEntry:
 
     def getColumn(self):
         return self._column
+
+    def isSingleUser(self):
+        return self._singleUser
 
 class ChainEntry:
 
@@ -2275,26 +2345,26 @@ class ChainEntry:
     def setFromStart(self, fromStart):
         self._fromStart = fromStart
         if self._fromEnd:
-            self._fromRegex = self.getRexeg(self._fromStart,self._fromEnd)
+            self._fromRegex = self.getRexegFromStartAndEnd(self._fromStart,self._fromEnd)
 
     def setFromEnd(self, fromEnd):
         self._fromEnd = fromEnd
         if self._fromStart:
-            self._fromRegex = self.getRexeg(self._fromStart,self._fromEnd)
+            self._fromRegex = self.getRexegFromStartAndEnd(self._fromStart,self._fromEnd)
 
     def setToStart(self, toStart):
         self._toStart = toStart
         if self._toEnd:
-            self._toRegex = self.getRexeg(self._toStart,self._toEnd)
+            self._toRegex = self.getRexegFromStartAndEnd(self._toStart,self._toEnd)
 
     def setToEnd(self, toEnd):
         self._toEnd = toEnd
         if self._toStart:
-            self._toRegex = self.getRexeg(self._toStart,self._toEnd)
+            self._toRegex = self.getRexegFromStartAndEnd(self._toStart,self._toEnd)
 
     def getRexegFromStartAndEnd(self,start,end):
-        # TODO encode special chars
-        return start+"(.*?)"+end
+        # TODO add this to the UI, perhaps with a right click option to change the table rows?
+        return re.escape(start)+"(.*?)"+re.escape(end)
 
     def getToIDRange(self):
         result = []
