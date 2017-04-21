@@ -1304,15 +1304,17 @@ class MatrixDB():
         # NOTE: leaving out chainResults
         
         for messageEntry in stateDict["arrayOfMessages"]:
-            self.arrayOfMessages.add(MessageEntry(
-                messageEntry["index"],
-                messageEntry["tableRow"],
-                RequestResponseStored(
+            requestResponse = None if messageEntry["deleted"] else RequestResponseStored(
                     extender,
                     messageEntry["host"],
                     messageEntry["port"],
                     messageEntry["protocol"],
-                    StringUtil.toBytes(base64.b64decode(messageEntry["requestBase64"]))),
+                    StringUtil.toBytes(base64.b64decode(messageEntry["requestBase64"])))
+            
+            self.arrayOfMessages.add(MessageEntry(
+                messageEntry["index"],
+                messageEntry["tableRow"],
+                requestResponse,
                 messageEntry["name"], 
                 {int(x): messageEntry["roles"][x] for x in messageEntry["roles"].keys()}, # convert keys to ints
                 base64.b64decode(messageEntry["regexBase64"]), 
@@ -1357,65 +1359,67 @@ class MatrixDB():
             deleted = roleEntry._deleted
             stateDict["arrayOfRoles"].append({
                     "index":roleEntry._index,
-                    "name":roleEntry._name if not deleted else "",
+                    "name":roleEntry._name if not deleted else None,
                     "deleted":deleted,
-                    "column":roleEntry._column if not deleted else -1,
-                    "singleUser":roleEntry._singleUser if not deleted else False
+                    "column":roleEntry._column if not deleted else None,
+                    "singleUser":roleEntry._singleUser if not deleted else None
                 })
 
         stateDict["arrayOfUsers"] = []
         for userEntry in self.arrayOfUsers:
+            deleted = userEntry._deleted
             stateDict["arrayOfUsers"].append({
                     "index":userEntry._index,
-                    "name":userEntry._name,
-                    "roles":userEntry._roles,
-                    "deleted":userEntry._deleted,
-                    "tableRow":userEntry._tableRow,
-                    "cookiesBase64":base64.b64encode(userEntry._cookies),
-                    "headerBase64":base64.b64encode(userEntry._header),
-                    "postargsBase64":base64.b64encode(userEntry._postargs),
-                    "chainResults":userEntry._chainResults
+                    "name":userEntry._name if not deleted else None,
+                    "roles":userEntry._roles if not deleted else {},
+                    "deleted":deleted,
+                    "tableRow":userEntry._tableRow if not deleted else None,
+                    "cookiesBase64":base64.b64encode(userEntry._cookies) if not deleted else "",
+                    "headerBase64":base64.b64encode(userEntry._header) if not deleted else "",
+                    "postargsBase64":base64.b64encode(userEntry._postargs) if not deleted else "",
+                    "chainResults":userEntry._chainResults if not deleted else {}
                 })
 
         stateDict["arrayOfMessages"] = []
         for messageEntry in self.arrayOfMessages:
-
+            deleted = messageEntry._deleted
             stateDict["arrayOfMessages"].append({
                     "index":messageEntry._index, 
-                    "tableRow":messageEntry._tableRow,
-                    "requestBase64":base64.b64encode(StringUtil.fromBytes(messageEntry._requestResponse.getRequest())),
-                    "host":messageEntry._requestResponse.getHttpService().getHost(),
-                    "port":messageEntry._requestResponse.getHttpService().getPort(),
-                    "protocol":messageEntry._requestResponse.getHttpService().getProtocol(),
-                    "name":messageEntry._name, 
-                    "roles":messageEntry._roles, 
-                    "regexBase64":base64.b64encode(messageEntry._regex), 
-                    "deleted":messageEntry._deleted,
-                    "failureRegexMode":messageEntry._failureRegexMode,
+                    "tableRow":messageEntry._tableRow if not deleted else None,
+                    "requestBase64":base64.b64encode(StringUtil.fromBytes(messageEntry._requestResponse.getRequest())) if not deleted else None,
+                    "host":messageEntry._requestResponse.getHttpService().getHost() if not deleted else None,
+                    "port":messageEntry._requestResponse.getHttpService().getPort() if not deleted else None,
+                    "protocol":messageEntry._requestResponse.getHttpService().getProtocol() if not deleted else None,
+                    "name":messageEntry._name if not deleted else None, 
+                    "roles":messageEntry._roles if not deleted else {}, 
+                    "regexBase64":base64.b64encode(messageEntry._regex) if not deleted else "", 
+                    "deleted":deleted,
+                    "failureRegexMode":messageEntry._failureRegexMode if not deleted else None,
                     "runBase64ForUserID":{int(x): {
                         "request": base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getRequest())),
                         "response": base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getResponse()))}
-                        for x in messageEntry._userRuns.keys()},
-                    "runResultForRoleID":messageEntry._roleResults
+                        for x in messageEntry._userRuns.keys()} if not deleted else {},
+                    "runResultForRoleID":messageEntry._roleResults if not deleted else {}
                 })
 
         stateDict["arrayOfChains"] = []
         for chainEntry in self.arrayOfChains:
+            deleted = chainEntry._deleted
             stateDict["arrayOfChains"].append({
                     "index":chainEntry._index,
-                    "fromID":chainEntry._fromID,
-                    "fromRegexBase64":base64.b64encode(chainEntry._fromRegex),
-                    "toID":chainEntry._toID,
-                    "toRegexBase64":base64.b64encode(chainEntry._toRegex),
-                    "deleted":chainEntry._deleted,
-                    "tableRow":chainEntry._tableRow,
-                    "name":chainEntry._name,
-                    "sourceUser":chainEntry._sourceUser,
-                    "enabled":chainEntry._enabled,
-                    "fromStart":chainEntry._fromStart,
-                    "fromEnd":chainEntry._fromEnd,
-                    "toStart":chainEntry._toStart,
-                    "toEnd":chainEntry._toEnd
+                    "fromID":chainEntry._fromID if not deleted else None,
+                    "fromRegexBase64":base64.b64encode(chainEntry._fromRegex) if not deleted else "",
+                    "toID":chainEntry._toID if not deleted else None,
+                    "toRegexBase64":base64.b64encode(chainEntry._toRegex) if not deleted else "",
+                    "deleted":deleted,
+                    "tableRow":chainEntry._tableRow if not deleted else None,
+                    "name":chainEntry._name if not deleted else None,
+                    "sourceUser":chainEntry._sourceUser if not deleted else None,
+                    "enabled":chainEntry._enabled if not deleted else None,
+                    "fromStart":chainEntry._fromStart if not deleted else None,
+                    "fromEnd":chainEntry._fromEnd if not deleted else None,
+                    "toStart":chainEntry._toStart if not deleted else None,
+                    "toEnd":chainEntry._toEnd if not deleted else None
                 })
 
         # BUG: this is not using the correct capitalization on booleans after loading legacy states
