@@ -785,6 +785,19 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
                 newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
 
+            # Replace with SV
+            # toValue = SV, toRegex = toRegex
+            for chain in [self._db.arrayOfChains[i] for i in self._db.getActiveChainIndexes()]:
+                svName = chain.getSVName()
+                if svName and chain._enabled and messageIndex in chain.getToIDRange():
+                    # get toValue for correct source
+                    sourceUser = chain._sourceUser if chain._sourceUser>=0 else userIndex
+                    toValue = self._db.getSVByName(svName).getValueForUserIndex(sourceUser)
+                    toRegex = chain._toRegex
+
+                    newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
+                    newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
+
             # Replace Custom Special Types (i.e. Random)
             newBody = StringUtil.toBytes(ModifyMessage.customReplace([StringUtil.fromBytes(newBody)])[0])
             newHeaders = ModifyMessage.customReplace(newHeaders)
@@ -811,7 +824,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 else:
                     response = StringUtil.fromBytes(response)
                     for chain in [self._db.arrayOfChains[c] for c in self._db.getActiveChainIndexes()]:
-                        # TODO check if fromID is a SV with prefix
+                        # This wont have issues with SV because of the prefix never matching the index
                         if str(chain._fromID) == str(messageIndex) and chain._enabled:
                             # If a sourceUser is set, replace for all users' chain results
                             # Else, replace each user's chain results individually
@@ -1831,10 +1844,10 @@ class MessageTableModel(AbstractTableModel):
                 roleIndex = self._db.getRoleByColumn(col, 'm')._index
                 messageEntry.addRoleByIndex(roleIndex,val)
     
+            self.fireTableCellUpdated(row,col)
             # Update the checkbox result colors since there was a change
             if col >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
                 messageEntry.clearResults()
-                self.fireTableCellUpdated(row,col)
                 for i in range(self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT, self.getColumnCount()):
                     self.fireTableCellUpdated(row,i)
                 # Backup option
@@ -1949,7 +1962,8 @@ class ChainTableModel(AbstractTableModel):
     def __init__(self, extender):
         self._extender = extender
         self._db = extender._db
-        self.rPrefix = "Request "
+        self.requestPrefix = "Request "
+        self.svPrefix = "SV_"
         self.chainFromDefault = "All Users (Default)"
 
     def getRowCount(self):
@@ -1993,9 +2007,15 @@ class ChainTableModel(AbstractTableModel):
                 return chainEntry._name
             elif columnIndex == 2:
                 if chainEntry._fromID.isdigit() and int(chainEntry._fromID) in self._db.getActiveMessageIndexes():
-                    return self.rPrefix+chainEntry._fromID
+                    return self.requestPrefix+chainEntry._fromID
+                elif chainEntry._fromID.startswith(self.svPrefix):
+                    # If it's a string, check if its a SV
+                    svEntry = self._db.getSVByName(chainEntry._fromID[len(self.svPrefix):])
+                    if svEntry:
+                        return svEntry._name
+                    else:
+                        return ""
                 else:
-                    # TODO check if its a static user token via prefix SV
                     return ""
             elif columnIndex == 3:
                 return chainEntry._fromRegex
@@ -2007,10 +2027,9 @@ class ChainTableModel(AbstractTableModel):
                 if chainEntry._sourceUser in self._db.getActiveUserIndexes():
                     return self._db.arrayOfUsers[chainEntry._sourceUser]._name
                 else:
-                    # NOTE: This is not necessary, but leaving in incase it's necessary for version consistency
-                    #if chainEntry._sourceUser != -1:
-                    #    print "Warning: source user is in invalid state: "+str(chainEntry._sourceUser)
-                    #    chainEntry._sourceUser = -1
+                    # NOTE: This is necessary if a selected user is deleted
+                    if chainEntry._sourceUser != -1:
+                        chainEntry._sourceUser = -1
                     return self.chainFromDefault
         return ""
 
@@ -2028,11 +2047,18 @@ class ChainTableModel(AbstractTableModel):
             elif col == 1:
                 chainEntry._name = val
             elif col == 2:
-                if val and self.rPrefix in val and val[len(self.rPrefix):].isdigit():
-                    chainEntry._fromID = val[len(self.rPrefix):]
+                if val and self.requestPrefix in val and val[len(self.requestPrefix):].isdigit():
+                    chainEntry._fromID = val[len(self.requestPrefix):]
                 else:
-                    # TODO parse val and determine if it's a static user token
-                    chainEntry._fromID = ""
+                    # If it's a string, check if its a SV
+                    svEntry = self._db.getSVByName(val)
+                    if svEntry:
+                        chainEntry._fromID = self.svPrefix+svEntry._name
+                        # Clear fromRegex since its unused
+                        chainEntry._fromRegex = ""
+                        self.fireTableCellUpdated(row,col+1)
+                    else:
+                        chainEntry._fromID = ""
             elif col == 3:
                 chainEntry._fromRegex = val
             elif col == 4:
@@ -2046,9 +2072,12 @@ class ChainTableModel(AbstractTableModel):
                 else:
                     chainEntry._sourceUser = -1
 
+            self.fireTableCellUpdated(row,col)
+
 
     def isCellEditable(self, row, col):
         if col >= 0:
+            # TODO Disable Regex when SV
             return True
         return False
 
@@ -2077,13 +2106,14 @@ class ChainTable(JTable):
 
             db = self.getModel()._db
 
-            # Comboboxes
+            # Chain From comboboxes
             users = [self.getModel().chainFromDefault]+[db.arrayOfUsers[x]._name for x in db.getActiveUserIndexes()]
             usersComboBox = JComboBox(users)
             usersComboBoxEditor = DefaultCellEditor(usersComboBox)
             self.getColumnModel().getColumn(6).setCellEditor(usersComboBoxEditor)
 
-            sources = [self.getModel().rPrefix+str(x) for x in db.getActiveMessageIndexes()] # TODO add static user tokens
+            # FromID comboboxes
+            sources = [self.getModel().requestPrefix+str(x) for x in db.getActiveMessageIndexes()] + [sv._name for sv in db.arrayOfSVs]
             sourcesComboBox = JComboBox(sources)
             sourcesComboBoxEditor = DefaultCellEditor(sourcesComboBox)
             self.getColumnModel().getColumn(2).setCellEditor(sourcesComboBoxEditor)
@@ -2454,6 +2484,12 @@ class ChainEntry:
                     a = int(part)
                     result.append(a)
         return result
+
+    def getSVName(self):
+        # TODO access svPrefix from above
+        if self._fromID.startswith("SV_"):
+            return self._fromID[3:]
+        return None
 
 class SVEntry:
 
