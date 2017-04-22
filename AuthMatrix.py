@@ -1005,6 +1005,7 @@ class ModifyMessage():
     def chainReplace(toRegex, toValue, toArray):
         ret = ArrayList()
         # HACK: URLEncode only the first line (either url path or body)
+        # TODO potentially remove default encoding and add chain encoding option instead
         encode = True
         for to in toArray:
             match = re.search(toRegex, to, re.DOTALL)
@@ -2077,8 +2078,11 @@ class ChainTableModel(AbstractTableModel):
 
     def isCellEditable(self, row, col):
         if col >= 0:
-            # TODO Disable Regex when SV
-            return True
+            # Disable Regex when SV
+            if col == 3 and self._db.getChainByRow(row).getSVName():
+                return False
+            else:
+                return True
         return False
 
     def getColumnClass(self, columnIndex):
