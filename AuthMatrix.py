@@ -148,9 +148,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     if type(component) is JTableHeader:
                         table = component.getTable()
                         column = component.columnAtPoint(e.getPoint())
-                        # TODO wrap this string
-                        if type(table) is MessageTable and column >= selfExtender._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT or type(table) is UserTable and column >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT:
-                            selfExtender._selectedColumn = column
+                        if (type(table) is MessageTable 
+                            and column >= selfExtender._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT 
+                            or type(table) is UserTable 
+                            and column >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT+selfExtender._db.arrayOfSVs.size()):
+                                selfExtender._selectedColumn = column
                         else:
                             return
                     else:
@@ -326,6 +328,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._newUserButton = JButton("New User", actionPerformed=self.getInputUserClick)
         self._newRoleButton = JButton("New Role", actionPerformed=self.getInputRoleClick)
         self._newChainButton = JButton("New Chain (Advanced)", actionPerformed=self.newChainClick)
+        self._newStaticValueButton =  JButton("New Static Value (Advanced)", actionPerformed=self.newStaticValueClick)
         self._saveButton = JButton("Save", actionPerformed=self.saveClick)
         self._loadButton = JButton("Load", actionPerformed=self.loadClick)
         self._clearButton = JButton("Clear", actionPerformed=self.clearClick)
@@ -338,10 +341,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         buttons.add(separator1)
         buttons.add(self._newUserButton)
         buttons.add(self._newRoleButton)
-        buttons.add(self._newChainButton)
         separator2 = JSeparator(SwingConstants.VERTICAL)
         separator2.setPreferredSize(Dimension(25,0))
         buttons.add(separator2)
+        buttons.add(self._newChainButton)
+        buttons.add(self._newStaticValueButton)
+        separator3 = JSeparator(SwingConstants.VERTICAL)
+        separator3.setPreferredSize(Dimension(25,0))
+        buttons.add(separator3)
         buttons.add(self._saveButton)
         buttons.add(self._loadButton)
         buttons.add(self._clearButton)
@@ -491,19 +498,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     ## Actions on Bottom Row Button Clicks
     ##
 
-    def printDB(self, e):
-        out = ""
-        for a in self._db.arrayOfUsers:
-            out += str(a._index)+" "+a._name+" : "+str(a._roles)+"\n"
-        for b in self._db.arrayOfMessages:
-            out += str(b._index)+" "+str(b._roles)+"\n"
-        JOptionPane.showMessageDialog(self._splitpane,out)
-
     def getInputUserClick(self, e):
         newUser = JOptionPane.showInputDialog(self._splitpane,"Enter New User:")
         if not newUser is None:
             self._db.getOrCreateUser(newUser)
             self._userTable.redrawTable()
+            # redraw Message Table since it adds a new SingleUser Role
             self._messageTable.redrawTable()
             self._chainTable.redrawTable()
 
@@ -517,6 +517,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def newChainClick(self,e):
         self._db.createNewChain()
         self._chainTable.redrawTable()
+
+    def newStaticValueClick(self, e):
+        newSV = JOptionPane.showInputDialog(self._splitpane,"Enter Name for New Static Value:")
+        if not newSV is None:
+            self._db.addNewSV(newSV)
+            self._userTable.redrawTable()
+            self._chainTable.redrawTable()
 
     def cancelClick(self,e):
         self._runCancelled = True
@@ -789,7 +796,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 else:
                     response = StringUtil.fromBytes(response)
                     for chain in [self._db.arrayOfChains[c] for c in self._db.getActiveChainIndexes()]:
-                        # TODO check if fromID is a SUT with prefix
+                        # TODO check if fromID is a SV with prefix
                         if str(chain._fromID) == str(messageIndex) and chain._enabled:
                             # If a sourceUser is set, replace for all users' chain results
                             # Else, replace each user's chain results individually
@@ -1028,6 +1035,7 @@ class MatrixDB():
         self.deletedRoleCount = 0
         self.deletedMessageCount = 0
         self.deletedChainCount = 0
+        self.arrayOfSVs = ArrayList()
 
 
     # Returns the index of the user, whether its new or not
@@ -1153,6 +1161,7 @@ class MatrixDB():
         self.deletedRoleCount = 0
         self.deletedMessageCount = 0
         self.deletedArrayCount = 0
+        self.arrayOfSVs = ArrayList()
         self.lock.release()
 
     def loadLegacy(self, fileName, extender):
@@ -1274,6 +1283,7 @@ class MatrixDB():
         self.deletedRoleCount = stateDict["deletedRoleCount"]
         self.deletedMessageCount = stateDict["deletedMessageCount"]
         self.deletedChainCount = stateDict["deletedChainCount"]
+        self.arrayOfSVs = ArrayList()
 
         for roleEntry in stateDict["arrayOfRoles"]:
             # Version: singleUser type roles added in v0.7
@@ -1310,7 +1320,7 @@ class MatrixDB():
                     messageEntry["port"],
                     messageEntry["protocol"],
                     StringUtil.toBytes(base64.b64decode(messageEntry["requestBase64"])))
-            
+
             self.arrayOfMessages.add(MessageEntry(
                 messageEntry["index"],
                 messageEntry["tableRow"],
@@ -1339,6 +1349,13 @@ class MatrixDB():
         
         # NOTE: leaving out fromStart, fromEnd, toStart, toEnd
 
+        if version >= "0.7" and "arrayOfSVs" in stateDict:
+            for svEntry in stateDict["arrayOfSVs"]:
+                self.arrayOfSVs.add(SVEntry(
+                    svEntry["name"],
+                    {int(x): svEntry["userValues"][x] for x in svEntry["userValues"].keys()}, # convert keys to ints
+                    ))
+
         self.lock.release()
 
 
@@ -1350,9 +1367,6 @@ class MatrixDB():
         "deletedRoleCount":self.deletedRoleCount,
         "deletedMessageCount":self.deletedMessageCount,
         "deletedChainCount":self.deletedChainCount}
-
-        # TODO potentially check if deleted and save empty fields for the rest
-        # Will need to still save an object for each one so that the arrays match the indexes on load
 
         stateDict["arrayOfRoles"] = []
         for roleEntry in self.arrayOfRoles:
@@ -1422,6 +1436,13 @@ class MatrixDB():
                     "toEnd":chainEntry._toEnd if not deleted else None
                 })
 
+        stateDict["arrayOfSVs"] = []
+        for SVEntry in self.arrayOfSVs:
+            stateDict["arrayOfSVs"].append({
+                "name":SVEntry._name,
+                "userValues":SVEntry._userValues
+                })
+
         # BUG: this is not using the correct capitalization on booleans after loading legacy states
         return json.dumps(stateDict)
 
@@ -1474,8 +1495,8 @@ class MatrixDB():
                 return userEntry
 
     def getRoleByColumn(self,column, table):
-        # TODO will need to update this when the user table has static values
-        startingIndex = self.STATIC_MESSAGE_TABLE_COLUMN_COUNT if table == "m" else self.STATIC_USER_TABLE_COLUMN_COUNT
+        # TODO potentially move this function to the tables
+        startingIndex = self.STATIC_MESSAGE_TABLE_COLUMN_COUNT if table == "m" else self.STATIC_USER_TABLE_COLUMN_COUNT+self.arrayOfSVs.size()
         for roleEntry in [self.arrayOfRoles[i] for i in self.getActiveRoleIndexes()]:
             if roleEntry.getColumn()+startingIndex == column:
                 return roleEntry
@@ -1573,6 +1594,27 @@ class MatrixDB():
             if self.arrayOfUsers[i]._name == name:
                 return self.arrayOfUsers[i]
 
+    def addNewSV(self, name):
+        if not self.getSVByName(name):
+            self.lock.acquire()
+            newSVEntry = SVEntry(name)
+            self.arrayOfSVs.add(newSVEntry)
+            self.lock.release()
+            return newSVEntry
+
+    def getSVByName(self, name):
+        for sv in self.arrayOfSVs:
+            if sv._name == name:
+                return sv
+        return None
+
+    def deleteSV(self, index):
+        if index<self.arrayOfSVs.size():
+            self.lock.acquire()
+            self.arrayOfSVs.remove(index)
+            self.lock.release()
+
+
 ##
 ## Tables and Table Models  
 ##
@@ -1587,11 +1629,13 @@ class UserTableModel(AbstractTableModel):
         return self._db.getActiveUserCount()
 
     def getColumnCount(self):
-        return self._db.getActiveRoleCount()+self._db.STATIC_USER_TABLE_COLUMN_COUNT-self._db.getActiveSingleUserRoleCount()
-
+        return (self._db.STATIC_USER_TABLE_COLUMN_COUNT
+            +self._db.arrayOfSVs.size()
+            +self._db.getActiveRoleCount()
+            -self._db.getActiveSingleUserRoleCount())
         
     def getColumnName(self, columnIndex):
-
+        svIndex = columnIndex-self._db.STATIC_USER_TABLE_COLUMN_COUNT
         if columnIndex == 0:
             return "ID"
         elif columnIndex == 1:
@@ -1602,6 +1646,8 @@ class UserTableModel(AbstractTableModel):
             return "HTTP Header"
         elif columnIndex == 4:
             return "POST Parameter"
+        elif svIndex >= 0 and svIndex < self._db.arrayOfSVs.size():
+            return self._db.arrayOfSVs[svIndex]._name
         else:
             roleEntry = self._db.getRoleByColumn(columnIndex, 'u')
             if roleEntry:
@@ -1610,6 +1656,7 @@ class UserTableModel(AbstractTableModel):
 
     def getValueAt(self, rowIndex, columnIndex):
         userEntry = self._db.getUserByRow(rowIndex)
+        svIndex = columnIndex-self._db.STATIC_USER_TABLE_COLUMN_COUNT
         if userEntry:
             if columnIndex == 0:
                 return userEntry._index
@@ -1621,6 +1668,8 @@ class UserTableModel(AbstractTableModel):
                 return userEntry._header
             elif columnIndex == 4:
                 return userEntry._postargs
+            elif svIndex >= 0 and svIndex < self._db.arrayOfSVs.size():
+                return self._db.arrayOfSVs[svIndex].getValueForUserIndex(userEntry._index)
             else:
                 roleEntry = self._db.getRoleByColumn(columnIndex, 'u')
                 if roleEntry:
@@ -1636,6 +1685,7 @@ class UserTableModel(AbstractTableModel):
         if self._db.lock.locked():
             return
         userEntry = self._db.getUserByRow(row)
+        svIndex = col-self._db.STATIC_USER_TABLE_COLUMN_COUNT
         if userEntry:
             if col == 1:
                 # Verify user name does not already exist
@@ -1648,6 +1698,8 @@ class UserTableModel(AbstractTableModel):
                 userEntry._header = val
             elif col == 4:
                 userEntry._postargs = val
+            elif svIndex >= 0 and svIndex < self._db.arrayOfSVs.size():
+                self._db.arrayOfSVs[svIndex].setValueForUserIndex(userEntry._index, val)
             else:
                 roleIndex = self._db.getRoleByColumn(col, 'u')._index
                 userEntry.addRoleByIndex(roleIndex, val)
@@ -1664,7 +1716,7 @@ class UserTableModel(AbstractTableModel):
         
     # Create checkboxes
     def getColumnClass(self, columnIndex):
-        if columnIndex < self._db.STATIC_USER_TABLE_COLUMN_COUNT:
+        if columnIndex < self._db.STATIC_USER_TABLE_COLUMN_COUNT+self._db.arrayOfSVs.size():
             return str
         else:
             return Boolean
@@ -1928,7 +1980,7 @@ class ChainTableModel(AbstractTableModel):
                 if chainEntry._fromID.isdigit() and int(chainEntry._fromID) in self._db.getActiveMessageIndexes():
                     return self.rPrefix+chainEntry._fromID
                 else:
-                    # TODO check if its a static user token via prefix SUT
+                    # TODO check if its a static user token via prefix SV
                     return ""
             elif columnIndex == 3:
                 return chainEntry._fromRegex
@@ -2388,6 +2440,21 @@ class ChainEntry:
                     result.append(a)
         return result
 
+class SVEntry:
+
+    def __init__(self, name, userValues = {}):
+        self._name=name
+        self._userValues = userValues.copy()
+
+    def setValueForUserIndex(self, userIndex, val):
+        self._userValues[userIndex] = val
+
+    def getValueForUserIndex(self, userIndex):
+        if userIndex in self._userValues:
+            return self._userValues[userIndex]
+        return ""
+
+
 
 ##
 ## RequestResponse Implementation
@@ -2492,7 +2559,6 @@ class MessageTableRowTransferHandler(TransferHandler):
             index = tablemax
 
         rowFrom = info.getTransferable().getTransferData(DataFlavor.stringFlavor)
-        #print "Moving row "+str(rowFrom)+" to row "+str(index)
         self._table.getModel()._db.moveMessageToRow(int(rowFrom), int(index))
         return True
 
