@@ -151,7 +151,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         if (type(table) is MessageTable 
                             and column >= selfExtender._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT 
                             or type(table) is UserTable 
-                            and column >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT+selfExtender._db.arrayOfSVs.size()):
+                            and column >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT):
                                 selfExtender._selectedColumn = column
                         else:
                             return
@@ -210,17 +210,32 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._selectedColumn = -1
                     selfExtender._chainTable.redrawTable()
 
-        class actionRemoveRole(ActionListener):
+        class actionRemoveColumn(ActionListener):
 
             def __init__(self, table):
                 self._table = table
 
             def actionPerformed(self,e):
                 if selfExtender._selectedColumn >= 0:
-                    selfExtender._db.deleteRole(selfExtender._db.getRoleByColumn(selfExtender._selectedColumn, self._table)._index)
+                    if self._table == "u":
+                        # Delete Role
+                        if selfExtender._selectedColumn >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT + selfExtender._db.arrayOfSVs.size():
+                            selfExtender._db.deleteRole(selfExtender._db.getRoleByColumn(
+                                selfExtender._selectedColumn, self._table)._index)
+                        # Delete SV
+                        elif (selfExtender._selectedColumn >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT 
+                            and selfExtender._selectedColumn < selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT + selfExtender._db.arrayOfSVs.size()):
+                                selfExtender._db.deleteSV(selfExtender._selectedColumn-selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT)
+
+                    elif self._table == "m":
+                        # Delete Role
+                        selfExtender._db.deleteRole(selfExtender._db.getRoleByColumn(
+                                selfExtender._selectedColumn, self._table)._index)
+
                     selfExtender._selectedColumn = -1
                     selfExtender._userTable.redrawTable()
                     selfExtender._messageTable.redrawTable()
+                    selfExtender._chainTable.redrawTable()
 
         class actionToggleRegex(ActionListener):
             def actionPerformed(self,e):
@@ -287,7 +302,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         messageHeaderPopup = JPopupMenu()
         addPopup(self._messageTable.getTableHeader(),messageHeaderPopup)
         roleRemoveFromMessageTable = JMenuItem("Remove Role")
-        roleRemoveFromMessageTable.addActionListener(actionRemoveRole("m"))
+        roleRemoveFromMessageTable.addActionListener(actionRemoveColumn("m"))
         messageHeaderPopup.add(roleRemoveFromMessageTable)
 
         # User Table popup
@@ -299,9 +314,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         userHeaderPopup = JPopupMenu()
         addPopup(self._userTable.getTableHeader(),userHeaderPopup)
-        roleRemoveFromUserTable = JMenuItem("Remove Role")
-        roleRemoveFromUserTable.addActionListener(actionRemoveRole("u"))
-        userHeaderPopup.add(roleRemoveFromUserTable)
+        removeColumnFromUserTable = JMenuItem("Remove")
+        removeColumnFromUserTable.addActionListener(actionRemoveColumn("u"))
+        userHeaderPopup.add(removeColumnFromUserTable)
 
         # Chain Table popup
         chainPopup = JPopupMenu()
@@ -1186,7 +1201,7 @@ class MatrixDB():
         self.deletedRoleCount = db.deletedRoleCount
         self.deletedMessageCount = db.deletedMessageCount
         self.deletedChainCount = 0 # Updated with chain entries below in arrayofUsers
-
+        self.arrayOfSVs = ArrayList()
 
         for message in db.arrayOfMessages:
             if message._successRegex.startswith(FAILURE_REGEX_SERIALIZE_CODE):
@@ -1609,9 +1624,9 @@ class MatrixDB():
         return None
 
     def deleteSV(self, index):
-        if index<self.arrayOfSVs.size():
+        if index >=0 and index<self.arrayOfSVs.size():
             self.lock.acquire()
-            self.arrayOfSVs.remove(index)
+            self.arrayOfSVs.remove(self.arrayOfSVs[index])
             self.lock.release()
 
 
