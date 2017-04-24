@@ -573,25 +573,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def loadClick(self,e):
         returnVal = self._fc.showOpenDialog(self._splitpane)
         if returnVal == JFileChooser.APPROVE_OPTION:
-            warning = """
-            CAUTION: 
-
-            Loading a saved configuration deserializes data. 
-            This action may pose a security threat to the application.
-            Only proceed when the source and contents of this file is trusted. 
-
-            Load Selected File?
-            """
-            result = JOptionPane.showOptionDialog(self._splitpane, 
-                warning, "Caution", 
-                JOptionPane.YES_NO_OPTION, 
-                JOptionPane.WARNING_MESSAGE, 
-                None, 
-                ["OK", "Cancel"],
-                "OK")
-
-            if result != JOptionPane.YES_OPTION:
-                return
             f = self._fc.getSelectedFile()
             fileName = f.getPath()
             
@@ -600,7 +581,25 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             filein.close()
             # Check if using on older state file compatible with v0.5.2 or greater
             if not jsonText or jsonText[0] !="{":
-                # TODO move warning only to here and clarify its for the old versions
+                warning = """
+                CAUTION: 
+    
+                Loading a saved configuration prior to v0.6.3 deserializes data into Jython objects. 
+                This action may pose a security threat to the application.
+                Only proceed when the source and contents of this file is trusted. 
+    
+                Load Selected File?
+                """
+                result = JOptionPane.showOptionDialog(self._splitpane, 
+                    warning, "Caution", 
+                    JOptionPane.YES_NO_OPTION, 
+                    JOptionPane.WARNING_MESSAGE, 
+                    None, 
+                    ["OK", "Cancel"],
+                    "OK")
+
+                if result != JOptionPane.YES_OPTION:
+                    return
                 self._db.loadLegacy(fileName,self)
             else:
                 self._db.loadJson(jsonText,self)
@@ -973,7 +972,6 @@ class ModifyMessage():
         # Handle Custom Header
         for newHeader in [x for x in newHeaders if x]:
             replaceIndex = -1
-            # TODO: Support multiple headers with a newline somehow
             colon = newHeader.find(":")
             if colon >= 0:
                 for i in range(headers.size()):
@@ -1204,7 +1202,7 @@ class MatrixDB():
         self.deletedUserCount = db.deletedUserCount
         self.deletedRoleCount = db.deletedRoleCount
         self.deletedMessageCount = db.deletedMessageCount
-        self.deletedChainCount = 0 # Updated with chain entries below in arrayofUsers
+        self.deletedChainCount = 0 # Updated with chain entries below in arrayOfUsers
         self.arrayOfSVs = ArrayList()
         self.headerCount = 1 # Legacy states had one header only
 
@@ -1528,7 +1526,6 @@ class MatrixDB():
                 return userEntry
 
     def getRoleByColumn(self,column, table):
-        # TODO potentially move this function to the tables
         startingIndex = self.STATIC_MESSAGE_TABLE_COLUMN_COUNT if table == "m" else self.STATIC_USER_TABLE_COLUMN_COUNT+self.headerCount+self.arrayOfSVs.size()
         for roleEntry in [self.arrayOfRoles[i] for i in self.getActiveRoleIndexes()]:
             if roleEntry.getColumn()+startingIndex == column:
@@ -1626,6 +1623,11 @@ class MatrixDB():
         for i in self.getActiveUserIndexes():
             if self.arrayOfUsers[i]._name == name:
                 return self.arrayOfUsers[i]
+
+    def getRoleByName(self, name):
+        for i in self.getActiveRoleIndexes():
+            if self.arrayOfRoles[i]._name == name:
+                return self.arrayOfRoles[i]
 
     def addNewSV(self, name):
         if not self.getSVByName(name):
@@ -1734,8 +1736,11 @@ class UserTableModel(AbstractTableModel):
             if col == 0:
                 # Verify user name does not already exist
                 if not self._db.getUserByName(val):
+                    # Rename SingleUser role too
+                    roleEntry = self._db.getRoleByName(userEntry._name+" (only)")
+                    if roleEntry:
+                        roleEntry._name = val+" (only)"
                     userEntry._name = val
-                # TODO rename SingleUser role too?
             elif col == 1:
                 userEntry._cookies = val
             elif headerIndex >=0 and headerIndex<self._db.headerCount:
@@ -1747,8 +1752,9 @@ class UserTableModel(AbstractTableModel):
                 userEntry.addRoleByIndex(roleIndex, val)
 
         self.fireTableCellUpdated(row,col)
-        # Refresh dropdown menu for Chains
+        # Refresh dropdown menu for Chains and SingleUser Role names for Messages
         self._extender._chainTable.redrawTable()
+        self._extender._messageTable.redrawTable()
 
     # Set checkboxes and role editable
     def isCellEditable(self, row, col):
@@ -1964,9 +1970,10 @@ class ChainTableModel(AbstractTableModel):
     def __init__(self, extender):
         self._extender = extender
         self._db = extender._db
+        self.chainFromDefault = "All Users (Default)"
         self.requestPrefix = "Request "
         self.svPrefix = "SV_"
-        self.chainFromDefault = "All Users (Default)"
+        self.destPrefix = "Request(s): "
 
     def getRowCount(self):
         return self._db.getActiveChainCount()
@@ -2022,7 +2029,7 @@ class ChainTableModel(AbstractTableModel):
             elif columnIndex == 3:
                 return chainEntry._fromRegex
             elif columnIndex == 4:
-                return "Request(s): "+chainEntry._toID
+                return self.destPrefix+chainEntry._toID
             elif columnIndex == 5:
                 return chainEntry._toRegex
             elif columnIndex == 6:
@@ -2135,7 +2142,7 @@ class ChainTable(JTable):
                     self.fireEditingStopped()
 
                 def getTableCellEditorComponent(self,table,value,isSelected,rowIndex,vColIndex):
-                    self.oldVal = value if "Request(s): " not in value else value[len("Request(s): "):]
+                    self.oldVal = value if self.getModel().destPrefix not in value else value[len(self.getModel().destPrefix):]
                     dests = db.getActiveMessageIndexes()
                     if dests:
                         self.destList = JList(dests)
