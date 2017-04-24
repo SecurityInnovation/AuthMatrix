@@ -219,13 +219,17 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if selfExtender._selectedColumn >= 0:
                     if self._table == "u":
                         # Delete Role
-                        if selfExtender._selectedColumn >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT + selfExtender._db.arrayOfSVs.size():
+                        if selfExtender._selectedColumn >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT + selfExtender._db.headerCount + selfExtender._db.arrayOfSVs.size():
                             selfExtender._db.deleteRole(selfExtender._db.getRoleByColumn(
                                 selfExtender._selectedColumn, self._table)._index)
+
                         # Delete SV
-                        elif (selfExtender._selectedColumn >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT 
-                            and selfExtender._selectedColumn < selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT + selfExtender._db.arrayOfSVs.size()):
-                                selfExtender._db.deleteSV(selfExtender._selectedColumn-selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT)
+                        elif selfExtender._selectedColumn >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT + selfExtender._db.headerCount:
+                            selfExtender._db.deleteSV(selfExtender._selectedColumn-(selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT+selfExtender._db.headerCount))
+
+                        # Delete Header
+                        elif selfExtender._selectedColumn >= selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT:
+                            selfExtender._db.deleteHeader(selfExtender._selectedColumn-selfExtender._db.STATIC_USER_TABLE_COLUMN_COUNT)
 
                     elif self._table == "m":
                         # Delete Role
@@ -254,7 +258,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             def replaceDomain(self, requestResponse, newDomain):
                 requestInfo = selfExtender._helpers.analyzeRequest(requestResponse)
                 reqBody = requestResponse.getRequest()[requestInfo.getBodyOffset():]            
-                newHeaders = ModifyMessage.getNewHeaders(requestInfo, None, "Host: "+newDomain)
+                newHeaders = ModifyMessage.getNewHeaders(requestInfo, None, ["Host: "+newDomain])
                 newreq = selfExtender._helpers.buildHttpMessage(newHeaders, reqBody)
                 return newreq
 
@@ -342,8 +346,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._cancelButton = JButton("Cancel", actionPerformed=self.cancelClick)
         self._newUserButton = JButton("New User", actionPerformed=self.getInputUserClick)
         self._newRoleButton = JButton("New Role", actionPerformed=self.getInputRoleClick)
-        self._newChainButton = JButton("New Chain (Advanced)", actionPerformed=self.newChainClick)
-        self._newStaticValueButton =  JButton("New Static Value (Advanced)", actionPerformed=self.newStaticValueClick)
+        self._newHeaderButton = JButton("New Header", actionPerformed=self.newHeaderClick)
+        self._newChainButton = JButton("New Chain", actionPerformed=self.newChainClick)
+        self._newStaticValueButton =  JButton("New Chain Source", actionPerformed=self.newStaticValueClick)
         self._saveButton = JButton("Save", actionPerformed=self.saveClick)
         self._loadButton = JButton("Load", actionPerformed=self.loadClick)
         self._clearButton = JButton("Clear", actionPerformed=self.clearClick)
@@ -356,6 +361,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         buttons.add(separator1)
         buttons.add(self._newUserButton)
         buttons.add(self._newRoleButton)
+        buttons.add(self._newHeaderButton)
         separator2 = JSeparator(SwingConstants.VERTICAL)
         separator2.setPreferredSize(Dimension(25,0))
         buttons.add(separator2)
@@ -515,7 +521,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
     def getInputUserClick(self, e):
         newUser = JOptionPane.showInputDialog(self._splitpane,"Enter New User:")
-        if not newUser is None:
+        if newUser:
             self._db.getOrCreateUser(newUser)
             self._userTable.redrawTable()
             # redraw Message Table since it adds a new SingleUser Role
@@ -524,7 +530,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
     def getInputRoleClick(self, e):
         newRole = JOptionPane.showInputDialog(self._splitpane,"Enter New Role:")
-        if not newRole is None:
+        if newRole:
             self._db.getOrCreateRole(newRole)
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
@@ -533,9 +539,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._db.createNewChain()
         self._chainTable.redrawTable()
 
+    def newHeaderClick(self, e):
+        self._db.addNewHeader()
+        self._userTable.redrawTable()
+
     def newStaticValueClick(self, e):
         newSV = JOptionPane.showInputDialog(self._splitpane,"Enter Name for New Static Value:")
-        if not newSV is None:
+        if newSV:
             self._db.addNewSV(newSV)
             self._userTable.redrawTable()
             self._chainTable.redrawTable()
@@ -777,8 +787,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
             userEntry = self._db.arrayOfUsers[userIndex]
-            newHeaders = ModifyMessage.getNewHeaders(requestInfo, userEntry._cookies, userEntry._header)
-            newBody = ModifyMessage.getNewBody(requestInfo, reqBody, userEntry._postargs)
+            newHeaders = ModifyMessage.getNewHeaders(requestInfo, userEntry._cookies, userEntry._headers)
+            newBody = reqBody
 
             # Replace with Chain
             for toRegex, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
@@ -937,7 +947,7 @@ class ModifyMessage():
 
     # Replaces headers/cookies with user's token
     @staticmethod
-    def getNewHeaders(requestInfo, newCookieStr, newHeader):
+    def getNewHeaders(requestInfo, newCookieStr, newHeaders):
         ret = requestInfo.getHeaders()
         headers = requestInfo.getHeaders()
 
@@ -961,7 +971,7 @@ class ModifyMessage():
                 ret.add(newCookiesHeader)
 
         # Handle Custom Header
-        if newHeader:
+        for newHeader in [x for x in newHeaders if x]:
             replaceIndex = -1
             # TODO: Support multiple headers with a newline somehow
             colon = newHeader.find(":")
@@ -977,30 +987,6 @@ class ModifyMessage():
                 ret.add(newHeader)
 
         return ret
-
-    # Add static CSRF token if available
-    # TODO Deprecate
-    @staticmethod
-    def getNewBody(requestInfo, reqBody, postargs):
-        
-        # Kinda hacky, but for now it will add the token as long as there is some content in the post body
-        # Even if its a GET request.  This screws up when original requests have no body though... oh well...
-        # TODO: Currently only handles one token
-        newBody = reqBody
-        if postargs and len(reqBody):
-            delimeter = postargs.find("=")
-            if delimeter >= 0:
-                csrfname = postargs[0:delimeter]
-                csrfvalue = postargs[delimeter+1:]
-                params = requestInfo.getParameters()
-                for param in params:
-                    if str(param.getName())==csrfname:
-                        # Handle CSRF Tokens in Body
-                        if param.getType() == 1:
-                            newBody = reqBody[0:param.getValueStart()-requestInfo.getBodyOffset()] + StringUtil.toBytes(csrfvalue) + reqBody[param.getValueEnd()-requestInfo.getBodyOffset():]
-                if newBody == reqBody:
-                    newBody = reqBody+StringUtil.toBytes("&"+postargs)
-        return newBody
 
     @staticmethod
     def chainReplace(toRegex, toValue, toArray):
@@ -1050,7 +1036,7 @@ class MatrixDB():
     def __init__(self):
         # Holds all custom data
         # NOTE: consider moving these constants to a different class
-        self.STATIC_USER_TABLE_COLUMN_COUNT = 5
+        self.STATIC_USER_TABLE_COLUMN_COUNT = 2
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
         self.LOAD_TIMEOUT = 10.0
@@ -1066,6 +1052,7 @@ class MatrixDB():
         self.deletedMessageCount = 0
         self.deletedChainCount = 0
         self.arrayOfSVs = ArrayList()
+        self.headerCount = 0
 
 
     # Returns the index of the user, whether its new or not
@@ -1081,7 +1068,8 @@ class MatrixDB():
             userIndex = self.arrayOfUsers.size()
             self.arrayOfUsers.add(UserEntry(userIndex,
                 userIndex - self.deletedUserCount,
-                name))
+                name,
+                headers=[""]*self.headerCount))
 
             # Add SingleUser Role
             self.lock.release()
@@ -1190,8 +1178,9 @@ class MatrixDB():
         self.deletedUserCount = 0
         self.deletedRoleCount = 0
         self.deletedMessageCount = 0
-        self.deletedArrayCount = 0
+        self.deletedChainCount = 0
         self.arrayOfSVs = ArrayList()
+        self.headerCount = 0
         self.lock.release()
 
     def loadLegacy(self, fileName, extender):
@@ -1217,6 +1206,7 @@ class MatrixDB():
         self.deletedMessageCount = db.deletedMessageCount
         self.deletedChainCount = 0 # Updated with chain entries below in arrayofUsers
         self.arrayOfSVs = ArrayList()
+        self.headerCount = 1 # Legacy states had one header only
 
         for message in db.arrayOfMessages:
             if message._successRegex.startswith(FAILURE_REGEX_SERIALIZE_CODE):
@@ -1278,7 +1268,6 @@ class MatrixDB():
                 cookies = token[0]
                 header = "" if len(token)==1 else token[1]
                 name = "" if not user._name else user._name
-                postarg = "" if not user._staticcsrf else user._staticcsrf
                 self.arrayOfUsers.add(UserEntry(
                     int(user._index),
                     int(user._tableRow),
@@ -1286,8 +1275,7 @@ class MatrixDB():
                     user._roles,
                     user._deleted,
                     cookies,
-                    header,
-                    postarg))
+                    headers=[header]))
 
         self.lock.release()
 
@@ -1315,6 +1303,17 @@ class MatrixDB():
         self.deletedChainCount = stateDict["deletedChainCount"]
         self.arrayOfSVs = ArrayList()
 
+        self.headerCount = 1
+        if version >= "0.7":
+            if "headerCount" in stateDict:
+                self.headerCount = stateDict["headerCount"]
+            if "arrayOfSVs" in stateDict:
+                for svEntry in stateDict["arrayOfSVs"]:
+                    self.arrayOfSVs.add(SVEntry(
+                        svEntry["name"],
+                        {int(x): svEntry["userValues"][x] for x in svEntry["userValues"].keys()}, # convert keys to ints
+                        ))
+
         for roleEntry in stateDict["arrayOfRoles"]:
             # Version: singleUser type roles added in v0.7
             if version < "0.7":
@@ -1331,6 +1330,17 @@ class MatrixDB():
 
 
         for userEntry in stateDict["arrayOfUsers"]:
+
+            # Suppport old and new header versions
+            if "headersBase64" in userEntry:
+                headers = [base64.b64decode(x) for x in userEntry["headersBase64"]]
+                if not userEntry["deleted"]:
+                    assert(len(headers)==self.headerCount)
+            elif "headerBase64" in userEntry and self.headerCount ==1:
+                headers = [base64.b64decode(userEntry["headerBase64"])]
+            else:     
+                headers = [""]*self.headerCount
+
             self.arrayOfUsers.add(UserEntry(
                 userEntry["index"],
                 userEntry["tableRow"],
@@ -1338,8 +1348,7 @@ class MatrixDB():
                 {int(x): userEntry["roles"][x] for x in userEntry["roles"].keys()}, # convert keys to ints
                 userEntry["deleted"],
                 base64.b64decode(userEntry["cookiesBase64"]),
-                base64.b64decode(userEntry["headerBase64"]),
-                base64.b64decode(userEntry["postargsBase64"])))
+                headers=headers))
 
         # NOTE: leaving out chainResults
         
@@ -1379,12 +1388,6 @@ class MatrixDB():
         
         # NOTE: leaving out fromStart, fromEnd, toStart, toEnd
 
-        if version >= "0.7" and "arrayOfSVs" in stateDict:
-            for svEntry in stateDict["arrayOfSVs"]:
-                self.arrayOfSVs.add(SVEntry(
-                    svEntry["name"],
-                    {int(x): svEntry["userValues"][x] for x in svEntry["userValues"].keys()}, # convert keys to ints
-                    ))
 
         self.lock.release()
 
@@ -1396,7 +1399,8 @@ class MatrixDB():
         "deletedUserCount":self.deletedUserCount,
         "deletedRoleCount":self.deletedRoleCount,
         "deletedMessageCount":self.deletedMessageCount,
-        "deletedChainCount":self.deletedChainCount}
+        "deletedChainCount":self.deletedChainCount,
+        "headerCount":self.headerCount}
 
         stateDict["arrayOfRoles"] = []
         for roleEntry in self.arrayOfRoles:
@@ -1419,8 +1423,7 @@ class MatrixDB():
                     "deleted":deleted,
                     "tableRow":userEntry._tableRow if not deleted else None,
                     "cookiesBase64":base64.b64encode(userEntry._cookies) if not deleted else "",
-                    "headerBase64":base64.b64encode(userEntry._header) if not deleted else "",
-                    "postargsBase64":base64.b64encode(userEntry._postargs) if not deleted else "",
+                    "headersBase64":[base64.b64encode(x) for x in userEntry._headers] if not deleted else [],
                     "chainResults":userEntry._chainResults if not deleted else {}
                 })
 
@@ -1526,7 +1529,7 @@ class MatrixDB():
 
     def getRoleByColumn(self,column, table):
         # TODO potentially move this function to the tables
-        startingIndex = self.STATIC_MESSAGE_TABLE_COLUMN_COUNT if table == "m" else self.STATIC_USER_TABLE_COLUMN_COUNT+self.arrayOfSVs.size()
+        startingIndex = self.STATIC_MESSAGE_TABLE_COLUMN_COUNT if table == "m" else self.STATIC_USER_TABLE_COLUMN_COUNT+self.headerCount+self.arrayOfSVs.size()
         for roleEntry in [self.arrayOfRoles[i] for i in self.getActiveRoleIndexes()]:
             if roleEntry.getColumn()+startingIndex == column:
                 return roleEntry
@@ -1644,6 +1647,21 @@ class MatrixDB():
             self.arrayOfSVs.remove(self.arrayOfSVs[index])
             self.lock.release()
 
+    def addNewHeader(self):
+        self.headerCount += 1
+        for userEntry in [self.arrayOfUsers[i] for i in self.getActiveUserIndexes()]:
+            userEntry._headers.append("")
+            assert(len(userEntry._headers)==self.headerCount)
+
+    def deleteHeader(self,index):
+        if index >=0 and index <self.headerCount:
+            self.headerCount -= 1
+            for userEntry in [self.arrayOfUsers[i] for i in self.getActiveUserIndexes()]:
+                userEntry._headers.pop(index)
+                assert(len(userEntry._headers)==self.headerCount)
+            return True
+        return False
+
 
 ##
 ## Tables and Table Models  
@@ -1660,22 +1678,20 @@ class UserTableModel(AbstractTableModel):
 
     def getColumnCount(self):
         return (self._db.STATIC_USER_TABLE_COLUMN_COUNT
+            +self._db.headerCount
             +self._db.arrayOfSVs.size()
             +self._db.getActiveRoleCount()
             -self._db.getActiveSingleUserRoleCount())
         
     def getColumnName(self, columnIndex):
-        svIndex = columnIndex-self._db.STATIC_USER_TABLE_COLUMN_COUNT
+        headerIndex = columnIndex-self._db.STATIC_USER_TABLE_COLUMN_COUNT
+        svIndex = headerIndex - self._db.headerCount
         if columnIndex == 0:
-            return "ID"
-        elif columnIndex == 1:
             return "User Name"
-        elif columnIndex == 2:
+        elif columnIndex == 1:
             return "Cookies"
-        elif columnIndex == 3:
+        elif headerIndex >=0 and headerIndex<self._db.headerCount:
             return "HTTP Header"
-        elif columnIndex == 4:
-            return "POST Parameter"
         elif svIndex >= 0 and svIndex < self._db.arrayOfSVs.size():
             return self._db.arrayOfSVs[svIndex]._name
         else:
@@ -1686,18 +1702,15 @@ class UserTableModel(AbstractTableModel):
 
     def getValueAt(self, rowIndex, columnIndex):
         userEntry = self._db.getUserByRow(rowIndex)
-        svIndex = columnIndex-self._db.STATIC_USER_TABLE_COLUMN_COUNT
+        headerIndex = columnIndex-self._db.STATIC_USER_TABLE_COLUMN_COUNT
+        svIndex = headerIndex - self._db.headerCount
         if userEntry:
             if columnIndex == 0:
-                return userEntry._index
-            elif columnIndex == 1:
                 return userEntry._name
-            elif columnIndex == 2:
+            elif columnIndex == 1:
                 return userEntry._cookies
-            elif columnIndex == 3:
-                return userEntry._header
-            elif columnIndex == 4:
-                return userEntry._postargs
+            elif headerIndex >=0 and headerIndex<self._db.headerCount:
+                return userEntry._headers[headerIndex]
             elif svIndex >= 0 and svIndex < self._db.arrayOfSVs.size():
                 return self._db.arrayOfSVs[svIndex].getValueForUserIndex(userEntry._index)
             else:
@@ -1715,19 +1728,18 @@ class UserTableModel(AbstractTableModel):
         if self._db.lock.locked():
             return
         userEntry = self._db.getUserByRow(row)
-        svIndex = col-self._db.STATIC_USER_TABLE_COLUMN_COUNT
+        headerIndex = col-self._db.STATIC_USER_TABLE_COLUMN_COUNT
+        svIndex = headerIndex - self._db.headerCount
         if userEntry:
-            if col == 1:
+            if col == 0:
                 # Verify user name does not already exist
                 if not self._db.getUserByName(val):
                     userEntry._name = val
                 # TODO rename SingleUser role too?
-            elif col == 2:
+            elif col == 1:
                 userEntry._cookies = val
-            elif col == 3:
-                userEntry._header = val
-            elif col == 4:
-                userEntry._postargs = val
+            elif headerIndex >=0 and headerIndex<self._db.headerCount:
+                userEntry._headers[headerIndex] = val
             elif svIndex >= 0 and svIndex < self._db.arrayOfSVs.size():
                 self._db.arrayOfSVs[svIndex].setValueForUserIndex(userEntry._index, val)
             else:
@@ -1740,13 +1752,11 @@ class UserTableModel(AbstractTableModel):
 
     # Set checkboxes and role editable
     def isCellEditable(self, row, col):
-        if col > 0:
-            return True
-        return False
+        return True
         
     # Create checkboxes
     def getColumnClass(self, columnIndex):
-        if columnIndex < self._db.STATIC_USER_TABLE_COLUMN_COUNT+self._db.arrayOfSVs.size():
+        if columnIndex < self._db.STATIC_USER_TABLE_COLUMN_COUNT+self._db.headerCount+self._db.arrayOfSVs.size():
             return str
         else:
             return Boolean
@@ -1763,27 +1773,17 @@ class UserTable(JTable):
         self.getModel().fireTableStructureChanged()
         self.getModel().fireTableDataChanged()
         
-        # Resize
-        # ID
-        self.getColumnModel().getColumn(0).setMinWidth(30);
-        self.getColumnModel().getColumn(0).setMaxWidth(30);
-
-
         # User Name
-        self.getColumnModel().getColumn(1).setMinWidth(100);
-        self.getColumnModel().getColumn(1).setMaxWidth(1000);
+        self.getColumnModel().getColumn(0).setMinWidth(150);
+        self.getColumnModel().getColumn(0).setMaxWidth(1000);
 
         # Cookie
-        self.getColumnModel().getColumn(2).setMinWidth(120);
-        self.getColumnModel().getColumn(2).setMaxWidth(1500);
+        self.getColumnModel().getColumn(1).setMinWidth(150);
+        self.getColumnModel().getColumn(1).setMaxWidth(1500);
 
         # Header
-        self.getColumnModel().getColumn(3).setMinWidth(120);
-        self.getColumnModel().getColumn(3).setMaxWidth(1500);
-
-        # POST args
-        self.getColumnModel().getColumn(4).setMinWidth(120);
-        self.getColumnModel().getColumn(4).setMaxWidth(1500);
+        #self.getColumnModel().getColumn(2).setMinWidth(120);
+        #self.getColumnModel().getColumn(2).setMaxWidth(1500);
 
         self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
 
@@ -2117,7 +2117,7 @@ class ChainTable(JTable):
             self.getColumnModel().getColumn(6).setCellEditor(usersComboBoxEditor)
 
             # FromID comboboxes
-            sources = [self.getModel().requestPrefix+str(x) for x in db.getActiveMessageIndexes()] + [sv._name for sv in db.arrayOfSVs]
+            sources = [sv._name for sv in db.arrayOfSVs] + [self.getModel().requestPrefix+str(x) for x in db.getActiveMessageIndexes()]
             sourcesComboBox = JComboBox(sources)
             sourcesComboBoxEditor = DefaultCellEditor(sourcesComboBox)
             self.getColumnModel().getColumn(2).setCellEditor(sourcesComboBoxEditor)
@@ -2340,15 +2340,14 @@ class MessageEntry:
 
 class UserEntry:
 
-    def __init__(self, index, tableRow, name, roles = {}, deleted=False, cookies="", header="", postargs=""):
+    def __init__(self, index, tableRow, name, roles = {}, deleted=False, cookies="", headers = []):
         self._index = index
         self._name = name
         self._roles = roles.copy()
         self._deleted = deleted
         self._tableRow = tableRow
         self._cookies = cookies
-        self._header = header
-        self._postargs = postargs
+        self._headers = headers
         self._chainResults = {}
         return
 
