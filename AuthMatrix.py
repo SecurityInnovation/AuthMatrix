@@ -544,7 +544,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._userTable.redrawTable()
 
     def newStaticValueClick(self, e):
-        newSV = JOptionPane.showInputDialog(self._splitpane,"Enter Name for New Static Value:")
+        newSV = JOptionPane.showInputDialog(self._splitpane,"Enter a label for the new Chain Source:")
         if newSV:
             self._db.addNewSV(newSV)
             self._userTable.redrawTable()
@@ -1990,11 +1990,11 @@ class ChainTableModel(AbstractTableModel):
         elif columnIndex == 3:
             return "Regex - Extract from HTTP Response"
         elif columnIndex == 4:
-            return "DEST - Request ID(s)"
+            return "Destination(s)"
         elif columnIndex == 5:
             return "Regex - Replace into HTTP Request"
         elif columnIndex == 6:
-            return "Chain Values From:"
+            return "Use Values From:"
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
@@ -2022,7 +2022,7 @@ class ChainTableModel(AbstractTableModel):
             elif columnIndex == 3:
                 return chainEntry._fromRegex
             elif columnIndex == 4:
-                return chainEntry._toID
+                return "Request(s): "+chainEntry._toID
             elif columnIndex == 5:
                 return chainEntry._toRegex
             elif columnIndex == 6:
@@ -2135,7 +2135,7 @@ class ChainTable(JTable):
                     self.fireEditingStopped()
 
                 def getTableCellEditorComponent(self,table,value,isSelected,rowIndex,vColIndex):
-                    self.oldVal = value
+                    self.oldVal = value if "Request(s): " not in value else value[len("Request(s): "):]
                     dests = db.getActiveMessageIndexes()
                     if dests:
                         self.destList = JList(dests)
