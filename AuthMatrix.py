@@ -792,11 +792,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if svName and chain._enabled and messageIndex in chain.getToIDRange():
                     # get toValue for correct source
                     sourceUser = chain._sourceUser if chain._sourceUser>=0 else userIndex
-                    toValue = self._db.getSVByName(svName).getValueForUserIndex(sourceUser)
-                    toRegex = chain._toRegex
-
-                    newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
-                    newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
+                    # Check that sourceUser is active
+                    if sourceUser in self._db.getActiveUserIndexes():
+                        toValue = self._db.getSVByName(svName).getValueForUserIndex(sourceUser)
+                        toRegex = chain._toRegex
+                        newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
+                        newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
 
             # Replace Custom Special Types (i.e. Random)
             newBody = StringUtil.toBytes(ModifyMessage.customReplace([StringUtil.fromBytes(newBody)])[0])
@@ -2027,11 +2028,10 @@ class ChainTableModel(AbstractTableModel):
             elif columnIndex == 6:
                 if chainEntry._sourceUser in self._db.getActiveUserIndexes():
                     return self._db.arrayOfUsers[chainEntry._sourceUser]._name
-                else:
-                    # NOTE: This is necessary if a selected user is deleted
-                    if chainEntry._sourceUser != -1:
-                        chainEntry._sourceUser = -1
+                elif chainEntry._sourceUser == -1:
                     return self.chainFromDefault
+                else:
+                    return ""
         return ""
 
     def addRow(self, row):
