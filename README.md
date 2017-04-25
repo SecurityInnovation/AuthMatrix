@@ -58,20 +58,6 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
 # Advanced Usage
 
-## Failure Regex Mode
-
-For certain targets, it may be easier to configure AuthMatrix to detect the response condition of when a request has failed. For example, if a target site returns unique data on successful requests, but always returns an HTTP 303 when an unauthorized action is performed. 
-
-In this mode, AuthMatrix will validate this regex for all users not part of a succeeding role.
-
-To do this, right click the request and select "Toggle Regex Mode".  The regex field will be highlighted in purple to indicate that AuthMatrix will run the request in Failure Regex Mode.
-
-__NOTE:__ False positive detection and highlighting may not work in Failure Regex Mode
-
-## Sample Configuration with Failure Regex Mode
-
-![Sample Configuration with Failure Regex Mode](images/img3.png)
-
 ## Chains
 
 Chains provide a way to copy a static or dynamic value into the body of a request. These values can be pulled from the response of a previously run request (using a regex) or by specifing user-specific static string values.
@@ -105,12 +91,28 @@ __NOTE:__ Requests are run in order of row, so the destination requests must be 
 
 ## Chains for CSRF
 
-![Chain for CSRF](images/img5.png)
+![Chain for CSRF](images/img4.png)
 
 ## Chains for Cross-User Resource Tests
 
-![Chain Pitchfork](images/img6.png)
+![Chain Cross-User](images/img5.png)
 
 ## Chains for Authenticating Users
+
+![Chain Authentication](images/img6.png)
+
+## Failure Regex Mode
+
+For certain targets, it may be easier to configure AuthMatrix to detect the response condition of when a request has failed. For example, if a target site returns unique data on successful requests, but always returns an HTTP 303 when an unauthorized action is performed. 
+
+In this mode, AuthMatrix will validate this regex for all users not part of a succeeding role.
+
+To do this, right click the request and select "Toggle Regex Mode".  The regex field will be highlighted in purple to indicate that AuthMatrix will run the request in Failure Regex Mode.
+
+__NOTE:__ False positive detection and highlighting may not work in Failure Regex Mode
+
+## Sample Configuration with Failure Regex Mode
+
+![Sample Configuration with Failure Regex Mode](images/img3.png)
 
 
