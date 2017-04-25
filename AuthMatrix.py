@@ -2029,7 +2029,7 @@ class ChainTableModel(AbstractTableModel):
             elif columnIndex == 3:
                 return chainEntry._fromRegex
             elif columnIndex == 4:
-                return self.destPrefix+chainEntry._toID
+                return "" if not chainEntry._toID else self.destPrefix+chainEntry._toID
             elif columnIndex == 5:
                 return chainEntry._toRegex
             elif columnIndex == 6:
@@ -2129,6 +2129,8 @@ class ChainTable(JTable):
             sourcesComboBoxEditor = DefaultCellEditor(sourcesComboBox)
             self.getColumnModel().getColumn(2).setCellEditor(sourcesComboBoxEditor)
 
+
+            destPrefix = self.getModel().destPrefix
             # Popup editor for DEST IDs
             class DestinationCellEditor(AbstractCellEditor, TableCellEditor, ActionListener):
                 # https://stackoverflow.com/questions/14153544/jtable-how-to-update-cell-using-custom-editor-by-pop-up-input-dialog-box
@@ -2142,7 +2144,7 @@ class ChainTable(JTable):
                     self.fireEditingStopped()
 
                 def getTableCellEditorComponent(self,table,value,isSelected,rowIndex,vColIndex):
-                    self.oldVal = value if self.getModel().destPrefix not in value else value[len(self.getModel().destPrefix):]
+                    self.oldVal = value if destPrefix not in value else value[len(destPrefix):]
                     dests = db.getActiveMessageIndexes()
                     if dests:
                         self.destList = JList(dests)
