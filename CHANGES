@@ -1,3 +1,23 @@
+v0.7 - 04/24/2017
+
+STATE FILE COMPATIBILITY - v0.5.2 and greater
+
+* Single-user Roles - Automatic roles made for each new user.  Will be useful for horizontal (cross-user) auth testing.
+
+* Deprecated Post Arg field in User Table - same functionality can be accomplished with Chains
+
+* Support multiple Header fields in User Table (default changed to 0)
+
+* Added Chain Sources - configurable strings per-user that can be used as the source of a chain. 
+
+* Removed most data for deleted items from the state file
+
+* Infer default Response Regex from the Response Code if available
+
+* Changed Chains Table to use dropdowns when possible
+
+* Various UI Changes and Bug Fixes
+
 v0.6.3 - 04/15/2017
 
 STATE FILE COMPATIBILITY - v0.5.2 and greater
