@@ -849,9 +849,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                                 match = re.search(chain._fromRegex, response, re.DOTALL)
                                 if match and len(match.groups()):
                                     result = match.group(1)
-                                    for toID in chain.getToIDRange():
-                                        for affectedUser in affectedUsers:
-                                            affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
+                                else:
+                                    result = ""
+                                for toID in chain.getToIDRange():
+                                    for affectedUser in affectedUsers:
+                                        affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
             index +=1
 
         # Grab all active roleIndexes that are checkboxed
@@ -988,22 +990,18 @@ class ModifyMessage():
 
     @staticmethod
     def chainReplace(toRegex, toValue, toArray):
-        ret = ArrayList()
-        # HACK: URLEncode only the first line (either url path or body)
-        # TODO potentially remove default encoding and add chain encoding option instead
-        encode = True
-        for to in toArray:
-            match = re.search(toRegex, to, re.DOTALL)
-            if match and len(match.groups()):
-                if encode:
-                    toValueNew = urllib2.quote(toValue)
-                else:
-                    toValueNew = toValue
-                ret.add(to[0:match.start(1)]+toValueNew+to[match.end(1):])
+        # TODO support encoding, including URL encode
+        isBody = len(toArray)==1
+        to = "\r\n".join(toArray)
+        match = re.search(toRegex, to, re.DOTALL)
+        if match and len(match.groups()):
+            ret = (to[0:match.start(1)]+toValue+to[match.end(1):])
+            if isBody:
+                return [ret]
             else:
-                ret.add(to)
-            encode=False
-        return ret
+                return ret.split("\r\n")
+        else:
+            return toArray
 
     ## Method to replace custom special types in messages
     @staticmethod
@@ -1420,8 +1418,8 @@ class MatrixDB():
                     "roles":userEntry._roles if not deleted else {},
                     "deleted":deleted,
                     "tableRow":userEntry._tableRow if not deleted else None,
-                    "cookiesBase64":base64.b64encode(userEntry._cookies) if not deleted else "",
-                    "headersBase64":[base64.b64encode(x) for x in userEntry._headers] if not deleted else [],
+                    "cookiesBase64":base64.b64encode(userEntry._cookies) if userEntry._cookies and not deleted else "",
+                    "headersBase64":[base64.b64encode(x) for x in userEntry._headers] if not deleted else [], # TODO save error when null
                     "chainResults":userEntry._chainResults if not deleted else {}
                 })
 
@@ -1437,7 +1435,7 @@ class MatrixDB():
                     "protocol":messageEntry._requestResponse.getHttpService().getProtocol() if not deleted else None,
                     "name":messageEntry._name if not deleted else None, 
                     "roles":messageEntry._roles if not deleted else {}, 
-                    "regexBase64":base64.b64encode(messageEntry._regex) if not deleted else "", 
+                    "regexBase64":base64.b64encode(messageEntry._regex) if messageEntry._regex and not deleted else "", 
                     "deleted":deleted,
                     "failureRegexMode":messageEntry._failureRegexMode if not deleted else None,
                     "runBase64ForUserID":{int(x): {
@@ -1453,9 +1451,9 @@ class MatrixDB():
             stateDict["arrayOfChains"].append({
                     "index":chainEntry._index,
                     "fromID":chainEntry._fromID if not deleted else None,
-                    "fromRegexBase64":base64.b64encode(chainEntry._fromRegex) if not deleted else "",
+                    "fromRegexBase64":base64.b64encode(chainEntry._fromRegex) if chainEntry._fromRegex and not deleted else "",
                     "toID":chainEntry._toID if not deleted else None,
-                    "toRegexBase64":base64.b64encode(chainEntry._toRegex) if not deleted else "",
+                    "toRegexBase64":base64.b64encode(chainEntry._toRegex) if chainEntry._toRegex and not deleted else "",
                     "deleted":deleted,
                     "tableRow":chainEntry._tableRow if not deleted else None,
                     "name":chainEntry._name if not deleted else None,
