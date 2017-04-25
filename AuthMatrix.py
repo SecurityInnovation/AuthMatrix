@@ -1419,7 +1419,7 @@ class MatrixDB():
                     "deleted":deleted,
                     "tableRow":userEntry._tableRow if not deleted else None,
                     "cookiesBase64":base64.b64encode(userEntry._cookies) if userEntry._cookies and not deleted else "",
-                    "headersBase64":[base64.b64encode(x) if x else "" for x in userEntry._headers] if not deleted else [], # TODO save error when null
+                    "headersBase64":[base64.b64encode(x) if x else "" for x in userEntry._headers] if not deleted else [],
                     "chainResults":userEntry._chainResults if not deleted else {}
                 })
 
@@ -1969,7 +1969,7 @@ class ChainTableModel(AbstractTableModel):
         self._extender = extender
         self._db = extender._db
         self.chainFromDefault = "All Users (Default)"
-        self.requestPrefix = "Request "
+        self.requestPrefix = "Request: "
         self.svPrefix = "SV_"
         self.destPrefix = "Request(s): "
 
