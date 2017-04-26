@@ -2173,15 +2173,15 @@ class ChainTable(JTable):
 
             # Resize
             self.getColumnModel().getColumn(0).setMinWidth(180);
-            self.getColumnModel().getColumn(0).setMaxWidth(240);
+            self.getColumnModel().getColumn(0).setMaxWidth(300);
             self.getColumnModel().getColumn(1).setMinWidth(115);
-            self.getColumnModel().getColumn(1).setMaxWidth(115);        
+            self.getColumnModel().getColumn(1).setMaxWidth(175);        
             self.getColumnModel().getColumn(2).setMinWidth(180);
             self.getColumnModel().getColumn(3).setMinWidth(160);
             self.getColumnModel().getColumn(3).setMaxWidth(160);        
             self.getColumnModel().getColumn(4).setMinWidth(180);
             self.getColumnModel().getColumn(5).setMinWidth(150);
-            self.getColumnModel().getColumn(5).setMaxWidth(150);        
+            self.getColumnModel().getColumn(5).setMaxWidth(270);        
 
 
 # For color-coding checkboxes in the message table
