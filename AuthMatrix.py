@@ -569,6 +569,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             fileout = open(fileName,'w')
             fileout.write(self._db.getSaveableJson())
             fileout.close()
+            # TODO currently this will save the config to burp, but not to a specific project
+            # Will also need an export and loadFromFile feature if this is ever implemented
+            # self._callbacks.saveExtensionSetting("AUTHMATRIX", self._db.getSaveableJson())
 
     def loadClick(self,e):
         returnVal = self._fc.showOpenDialog(self._splitpane)
@@ -603,6 +606,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 self._db.loadLegacy(fileName,self)
             else:
                 self._db.loadJson(jsonText,self)
+                # TODO currently can load exention settings, but this is saved for Burp and not for the Project specifically
+                # self._db.loadJson(self._callbacks.loadExtensionSetting("AUTHMATRIX"),self)
 
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
@@ -722,7 +727,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._runButton.setEnabled(not running)
         self._newUserButton.setEnabled(not running)
         self._newRoleButton.setEnabled(not running)
+        self._newHeaderButton.setEnabled(not running)
         self._newChainButton.setEnabled(not running)
+        self._newStaticValueButton.setEnabled(not running)
         self._saveButton.setEnabled(not running)
         self._loadButton.setEnabled(not running)
         self._clearButton.setEnabled(not running)
@@ -798,7 +805,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             # toValue = SV, toRegex = toRegex
             for chain in [self._db.arrayOfChains[i] for i in self._db.getActiveChainIndexes()]:
                 svName = chain.getSVName()
-                if svName and chain._enabled and messageIndex in chain.getToIDRange():
+                if svName and messageIndex in chain.getToIDRange():
                     # get toValue for correct source
                     sourceUser = chain._sourceUser if chain._sourceUser>=0 else userIndex
                     # Check that sourceUser is active
@@ -835,7 +842,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     response = StringUtil.fromBytes(response)
                     for chain in [self._db.arrayOfChains[c] for c in self._db.getActiveChainIndexes()]:
                         # This wont have issues with SV because of the prefix never matching the index
-                        if str(chain._fromID) == str(messageIndex) and chain._enabled:
+                        if str(chain._fromID) == str(messageIndex):
                             # If a sourceUser is set, replace for all users' chain results
                             # Else, replace each user's chain results individually
                             replace = True
@@ -845,12 +852,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                                     affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
                                 else:
                                     replace = False
+
                             if replace:
-                                match = re.search(chain._fromRegex, response, re.DOTALL)
-                                if match and len(match.groups()):
-                                    result = match.group(1)
-                                else:
-                                    result = ""
+                                result = ""
+                                if chain._fromRegex:
+                                    match = re.search(chain._fromRegex, response, re.DOTALL)
+                                    if match and len(match.groups()):
+                                        result = match.group(1)
+                                
                                 for toID in chain.getToIDRange():
                                     for affectedUser in affectedUsers:
                                         affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
@@ -993,15 +1002,15 @@ class ModifyMessage():
         # TODO support encoding, including URL encode
         isBody = len(toArray)==1
         to = "\r\n".join(toArray)
-        match = re.search(toRegex, to, re.DOTALL)
-        if match and len(match.groups()):
-            ret = (to[0:match.start(1)]+toValue+to[match.end(1):])
-            if isBody:
-                return [ret]
-            else:
-                return ret.split("\r\n")
-        else:
-            return toArray
+        if toRegex:
+            match = re.search(toRegex, to, re.DOTALL)
+            if match and len(match.groups()):
+                ret = (to[0:match.start(1)]+toValue+to[match.end(1):])
+                if isBody:
+                    return [ret]
+                else:
+                    return ret.split("\r\n")
+        return toArray
 
     ## Method to replace custom special types in messages
     @staticmethod
@@ -1034,7 +1043,7 @@ class MatrixDB():
         # NOTE: consider moving these constants to a different class
         self.STATIC_USER_TABLE_COLUMN_COUNT = 2
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
-        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
+        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 6
         self.LOAD_TIMEOUT = 10.0
         self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
 
@@ -1378,8 +1387,7 @@ class MatrixDB():
                 chainEntry["toID"],
                 base64.b64decode(chainEntry["toRegexBase64"]),
                 chainEntry["deleted"],
-                chainEntry["sourceUser"],
-                chainEntry["enabled"]
+                chainEntry["sourceUser"]
                 ))
         
         # NOTE: leaving out fromStart, fromEnd, toStart, toEnd
@@ -1458,7 +1466,6 @@ class MatrixDB():
                     "tableRow":chainEntry._tableRow if not deleted else None,
                     "name":chainEntry._name if not deleted else None,
                     "sourceUser":chainEntry._sourceUser if not deleted else None,
-                    "enabled":chainEntry._enabled if not deleted else None,
                     "fromStart":chainEntry._fromStart if not deleted else None,
                     "fromEnd":chainEntry._fromEnd if not deleted else None,
                     "toStart":chainEntry._toStart if not deleted else None,
@@ -1785,10 +1792,6 @@ class UserTable(JTable):
         self.getColumnModel().getColumn(1).setMinWidth(150);
         self.getColumnModel().getColumn(1).setMaxWidth(1500);
 
-        # Header
-        #self.getColumnModel().getColumn(2).setMinWidth(120);
-        #self.getColumnModel().getColumn(2).setMaxWidth(1500);
-
         self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
 
 
@@ -1987,18 +1990,16 @@ class ChainTableModel(AbstractTableModel):
             return ""
 
         if columnIndex == 0:
-            return "Enabled"
-        elif columnIndex == 1:
             return "Chain Name"
-        elif columnIndex == 2:
+        elif columnIndex == 1:
             return "Source"
-        elif columnIndex == 3:
+        elif columnIndex == 2:
             return "Regex - Extract from HTTP Response"
-        elif columnIndex == 4:
+        elif columnIndex == 3:
             return "Destination(s)"
-        elif columnIndex == 5:
+        elif columnIndex == 4:
             return "Regex - Replace into HTTP Request"
-        elif columnIndex == 6:
+        elif columnIndex == 5:
             return "Use Values From:"
         return ""
 
@@ -2009,10 +2010,8 @@ class ChainTableModel(AbstractTableModel):
         chainEntry = self._db.getChainByRow(rowIndex)
         if chainEntry:
             if columnIndex == 0:
-                return chainEntry._enabled
-            elif columnIndex == 1:
                 return chainEntry._name
-            elif columnIndex == 2:
+            elif columnIndex == 1:
                 if chainEntry._fromID.isdigit() and int(chainEntry._fromID) in self._db.getActiveMessageIndexes():
                     return self.requestPrefix+chainEntry._fromID
                 elif chainEntry._fromID.startswith(self.svPrefix):
@@ -2024,13 +2023,13 @@ class ChainTableModel(AbstractTableModel):
                         return ""
                 else:
                     return ""
-            elif columnIndex == 3:
+            elif columnIndex == 2:
                 return chainEntry._fromRegex
-            elif columnIndex == 4:
+            elif columnIndex == 3:
                 return "" if not chainEntry._toID else self.destPrefix+chainEntry._toID
-            elif columnIndex == 5:
+            elif columnIndex == 4:
                 return chainEntry._toRegex
-            elif columnIndex == 6:
+            elif columnIndex == 5:
                 if chainEntry._sourceUser in self._db.getActiveUserIndexes():
                     return self._db.arrayOfUsers[chainEntry._sourceUser]._name
                 elif chainEntry._sourceUser == -1:
@@ -2049,10 +2048,8 @@ class ChainTableModel(AbstractTableModel):
         chainEntry = self._db.getChainByRow(row)
         if chainEntry:
             if col == 0:
-                chainEntry._enabled = val
-            elif col == 1:
                 chainEntry._name = val
-            elif col == 2:
+            elif col == 1:
                 if val and self.requestPrefix in val and val[len(self.requestPrefix):].isdigit():
                     chainEntry._fromID = val[len(self.requestPrefix):]
                 else:
@@ -2065,13 +2062,13 @@ class ChainTableModel(AbstractTableModel):
                         self.fireTableCellUpdated(row,col+1)
                     else:
                         chainEntry._fromID = ""
-            elif col == 3:
+            elif col == 2:
                 chainEntry._fromRegex = val
-            elif col == 4:
+            elif col == 3:
                 chainEntry._toID = val
-            elif col == 5:
+            elif col == 4:
                 chainEntry._toRegex = val
-            elif col == 6:
+            elif col == 5:
                 user = self._db.getUserByName(val)
                 if user:
                     chainEntry._sourceUser = user._index
@@ -2084,15 +2081,13 @@ class ChainTableModel(AbstractTableModel):
     def isCellEditable(self, row, col):
         if col >= 0:
             # Disable Regex when SV
-            if col == 3 and self._db.getChainByRow(row).getSVName():
+            if col == 2 and self._db.getChainByRow(row).getSVName():
                 return False
             else:
                 return True
         return False
 
     def getColumnClass(self, columnIndex):
-        if columnIndex == 0:
-            return Boolean
         return str
         
 
@@ -2119,13 +2114,13 @@ class ChainTable(JTable):
             users = [self.getModel().chainFromDefault]+[db.arrayOfUsers[x]._name for x in db.getActiveUserIndexes()]
             usersComboBox = JComboBox(users)
             usersComboBoxEditor = DefaultCellEditor(usersComboBox)
-            self.getColumnModel().getColumn(6).setCellEditor(usersComboBoxEditor)
+            self.getColumnModel().getColumn(5).setCellEditor(usersComboBoxEditor)
 
             # FromID comboboxes
             sources = [sv._name for sv in db.arrayOfSVs] + [self.getModel().requestPrefix+str(x) for x in db.getActiveMessageIndexes()]
             sourcesComboBox = JComboBox(sources)
             sourcesComboBoxEditor = DefaultCellEditor(sourcesComboBox)
-            self.getColumnModel().getColumn(2).setCellEditor(sourcesComboBoxEditor)
+            self.getColumnModel().getColumn(1).setCellEditor(sourcesComboBoxEditor)
 
 
             destPrefix = self.getModel().destPrefix
@@ -2174,21 +2169,19 @@ class ChainTable(JTable):
                             ret[-1].append(val)
                     return ",".join([str(x[0]) if len(x)==1 else str(x[0])+"-"+str(x[-1]) for x in ret])
 
-            self.getColumnModel().getColumn(4).setCellEditor(DestinationCellEditor())
+            self.getColumnModel().getColumn(3).setCellEditor(DestinationCellEditor())
 
             # Resize
-            self.getColumnModel().getColumn(0).setMinWidth(60);
-            self.getColumnModel().getColumn(0).setMaxWidth(60);
-            self.getColumnModel().getColumn(1).setMinWidth(120);
-            self.getColumnModel().getColumn(1).setMaxWidth(240);
-            self.getColumnModel().getColumn(2).setMinWidth(115);
-            self.getColumnModel().getColumn(2).setMaxWidth(115);        
-            self.getColumnModel().getColumn(3).setMinWidth(180);
-            self.getColumnModel().getColumn(4).setMinWidth(160);
-            self.getColumnModel().getColumn(4).setMaxWidth(160);        
-            self.getColumnModel().getColumn(5).setMinWidth(180);
-            self.getColumnModel().getColumn(6).setMinWidth(150);
-            self.getColumnModel().getColumn(6).setMaxWidth(150);        
+            self.getColumnModel().getColumn(0).setMinWidth(180);
+            self.getColumnModel().getColumn(0).setMaxWidth(300);
+            self.getColumnModel().getColumn(1).setMinWidth(115);
+            self.getColumnModel().getColumn(1).setMaxWidth(175);        
+            self.getColumnModel().getColumn(2).setMinWidth(180);
+            self.getColumnModel().getColumn(3).setMinWidth(160);
+            self.getColumnModel().getColumn(3).setMaxWidth(160);        
+            self.getColumnModel().getColumn(4).setMinWidth(180);
+            self.getColumnModel().getColumn(5).setMinWidth(150);
+            self.getColumnModel().getColumn(5).setMaxWidth(270);        
 
 
 # For color-coding checkboxes in the message table
@@ -2416,7 +2409,7 @@ class RoleEntry:
 
 class ChainEntry:
 
-    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser=-1, enabled=False):
+    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser=-1):
         self._index = index
         self._fromID = fromID
         self._fromRegex = fromRegex
@@ -2426,7 +2419,6 @@ class ChainEntry:
         self._tableRow = tableRow
         self._name = name
         self._sourceUser = sourceUser
-        self._enabled = enabled
         self._fromStart = ""
         self._fromEnd = ""
         self._toStart = ""
