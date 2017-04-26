@@ -569,6 +569,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             fileout = open(fileName,'w')
             fileout.write(self._db.getSaveableJson())
             fileout.close()
+            # TODO currently this will save the config to burp, but not to a specific project
+            # Will also need an export and loadFromFile feature if this is ever implemented
+            # self._callbacks.saveExtensionSetting("AUTHMATRIX", self._db.getSaveableJson())
 
     def loadClick(self,e):
         returnVal = self._fc.showOpenDialog(self._splitpane)
@@ -603,6 +606,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 self._db.loadLegacy(fileName,self)
             else:
                 self._db.loadJson(jsonText,self)
+                # TODO currently can load exention settings, but this is saved for Burp and not for the Project specifically
+                # self._db.loadJson(self._callbacks.loadExtensionSetting("AUTHMATRIX"),self)
 
             self._userTable.redrawTable()
             self._messageTable.redrawTable()
@@ -722,7 +727,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._runButton.setEnabled(not running)
         self._newUserButton.setEnabled(not running)
         self._newRoleButton.setEnabled(not running)
+        self._newHeaderButton.setEnabled(not running)
         self._newChainButton.setEnabled(not running)
+        self._newStaticValueButton.setEnabled(not running)
         self._saveButton.setEnabled(not running)
         self._loadButton.setEnabled(not running)
         self._clearButton.setEnabled(not running)
@@ -845,12 +852,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                                     affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
                                 else:
                                     replace = False
+
                             if replace:
-                                match = re.search(chain._fromRegex, response, re.DOTALL)
-                                if match and len(match.groups()):
-                                    result = match.group(1)
-                                else:
-                                    result = ""
+                                result = ""
+                                if chain._fromRegex:
+                                    match = re.search(chain._fromRegex, response, re.DOTALL)
+                                    if match and len(match.groups()):
+                                        result = match.group(1)
+                                
                                 for toID in chain.getToIDRange():
                                     for affectedUser in affectedUsers:
                                         affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
@@ -993,15 +1002,15 @@ class ModifyMessage():
         # TODO support encoding, including URL encode
         isBody = len(toArray)==1
         to = "\r\n".join(toArray)
-        match = re.search(toRegex, to, re.DOTALL)
-        if match and len(match.groups()):
-            ret = (to[0:match.start(1)]+toValue+to[match.end(1):])
-            if isBody:
-                return [ret]
-            else:
-                return ret.split("\r\n")
-        else:
-            return toArray
+        if toRegex:
+            match = re.search(toRegex, to, re.DOTALL)
+            if match and len(match.groups()):
+                ret = (to[0:match.start(1)]+toValue+to[match.end(1):])
+                if isBody:
+                    return [ret]
+                else:
+                    return ret.split("\r\n")
+        return toArray
 
     ## Method to replace custom special types in messages
     @staticmethod
@@ -1784,10 +1793,6 @@ class UserTable(JTable):
         # Cookie
         self.getColumnModel().getColumn(1).setMinWidth(150);
         self.getColumnModel().getColumn(1).setMaxWidth(1500);
-
-        # Header
-        #self.getColumnModel().getColumn(2).setMinWidth(120);
-        #self.getColumnModel().getColumn(2).setMaxWidth(1500);
 
         self.getTableHeader().getDefaultRenderer().setHorizontalAlignment(JLabel.CENTER)
 
