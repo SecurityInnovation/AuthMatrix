@@ -72,8 +72,6 @@ The most common use cases for Chains are:
 
 A Chain entry has the following values:
 
-* __Enabled:__ a checkbox to enable/disable the chain (useful for debugging)
-
 * __Chain Name:__ a descriptive name
 
 * __Source:__ a static user string defined in the User Table or the ID of the source request in the Request table
