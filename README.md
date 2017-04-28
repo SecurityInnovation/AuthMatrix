@@ -36,7 +36,7 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
     * Common regexes include HTTP Response headers, success messages within the body, or other variations within the body of the page.
 
-    * NOTE: Requests can be configured to use a Failure Regex instead through the right-click menu (i.e. Anonymous should never receive an HTTP 200)
+    * NOTE: Requests can be configured to use a Failure Regex instead through the right-click menu (i.e. Authenticated users should never receive an HTTP 303)
 
 
 7. Click Run at the bottom to run all requests or right click several requests and select run.  Observe that the adjacent table will show color-coded results.
