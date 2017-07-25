@@ -567,9 +567,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if result != JOptionPane.YES_OPTION:
                     return
             fileName = f.getPath()
-            fileout = open(fileName,'w')
-            fileout.write(self._db.getSaveableJson())
-            fileout.close()
+            # TODO Bug here.  Check if the value being written is 0 before opening
+            jsonValue = self._db.getSaveableJson()
+            if jsonValue:
+                fileout = open(fileName,'w')
+                fileout.write(jsonValue)
+                fileout.close()
+            else:
+                # TODO pop up error
+                print "Error: Save Failed. JSON empty."
             # TODO currently this will save the config to burp, but not to a specific project
             # Will also need an export and loadFromFile feature if this is ever implemented
             # self._callbacks.saveExtensionSetting("AUTHMATRIX", self._db.getSaveableJson())
