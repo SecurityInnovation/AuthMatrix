@@ -79,7 +79,7 @@ import random
 import string
 
 
-AUTHMATRIX_VERSION = "0.7"
+AUTHMATRIX_VERSION = "0.7.1"
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
     
@@ -280,6 +280,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                                 request = self.replaceDomain(m._requestResponse, host)
                             else:
                                 request = m._requestResponse.getRequest()
+                            # TODO save the Response?
                             m._requestResponse = RequestResponseStored(selfExtender, host, int(port), "https" if tls else "http", request)
                             m.clearResults()
                     selfExtender._selectedColumn = -1
@@ -435,8 +436,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         def addRequestsToTab(e):
             for messageInfo in messages:
-                # saveBuffers is required since modifying the original from its source changes the saved objects, its not a copy
-                # TODO maybe replace with RequestResponseStored?
                 requestInfo = self._helpers.analyzeRequest(messageInfo)
                 name = str(requestInfo.getMethod()).ljust(8) + requestInfo.getUrl().getPath()
                 # Grab regex from response
@@ -447,7 +446,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     if len(responseInfo.getHeaders()):
                         responseCodeHeader = responseInfo.getHeaders()[0]
                         regex = "^"+re.escape(responseCodeHeader)
-                messageIndex = self._db.createNewMessage(self._callbacks.saveBuffersToTempFiles(messageInfo), name, regex)
+                # Must create a new RequestResponseStored object since modifying the original messageInfo
+                # from its source (such as Repeater) changes this saved object. MessageInfo is a reference, not a copy
+                messageIndex = self._db.createNewMessage(RequestResponseStored(self,requestResponse=messageInfo), name, regex)
             self._messageTable.redrawTable()
             self._chainTable.redrawTable()
 
@@ -828,41 +829,48 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             t = Thread(target=loadRequestResponse, args = [index,messageInfo.getHttpService(),message])
             t.start()
             t.join(self._db.LOAD_TIMEOUT)
+
+            # Create default requestResponse without response
+            requestResponse = RequestResponseStored(self, 
+                request=message, 
+                httpService=messageInfo.getHttpService())
+
             if t.isAlive():
-                print "ERROR: Request Timeout"
-            requestResponse = tempRequestResponse[index]
-            if requestResponse:
-                messageEntry.addRunByUserIndex(userIndex, self._callbacks.saveBuffersToTempFiles(requestResponse))
+                print "ERROR: Request Timeout for Request #"+str(messageIndex)+" and User #"+str(userIndex)
+            elif tempRequestResponse[index]:
+                requestResponse = RequestResponseStored(self,requestResponse=tempRequestResponse[index])
+            
+            messageEntry.addRunByUserIndex(userIndex, requestResponse)
 
-                # Get Chain Result
-                response = requestResponse.getResponse()
-                if not response:
-                    print "ERROR: No HTTP Response (Likely Invalid Target Host)"
-                else:
-                    response = StringUtil.fromBytes(response)
-                    for chain in [self._db.arrayOfChains[c] for c in self._db.getActiveChainIndexes()]:
-                        # This wont have issues with SV because of the prefix never matching the index
-                        if str(chain._fromID) == str(messageIndex):
-                            # If a sourceUser is set, replace for all users' chain results
-                            # Else, replace each user's chain results individually
-                            replace = True
-                            affectedUsers = [userEntry]
-                            if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0:
-                                if str(chain._sourceUser) == str(userIndex):
-                                    affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
-                                else:
-                                    replace = False
+            # Get Chain Result
+            response = requestResponse.getResponse()
+            if not response:
+                print "ERROR: No HTTP Response for Request #"+str(messageIndex)+" and User #"+str(userIndex)
+            else:
+                response = StringUtil.fromBytes(response)
+                for chain in [self._db.arrayOfChains[c] for c in self._db.getActiveChainIndexes()]:
+                    # This wont have issues with SV because of the prefix never matching the index
+                    if str(chain._fromID) == str(messageIndex):
+                        # If a sourceUser is set, replace for all users' chain results
+                        # Else, replace each user's chain results individually
+                        replace = True
+                        affectedUsers = [userEntry]
+                        if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0:
+                            if str(chain._sourceUser) == str(userIndex):
+                                affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
+                            else:
+                                replace = False
 
-                            if replace:
-                                result = ""
-                                if chain._fromRegex:
-                                    match = re.search(chain._fromRegex, response, re.DOTALL)
-                                    if match and len(match.groups()):
-                                        result = match.group(1)
+                        if replace:
+                            result = ""
+                            if chain._fromRegex:
+                                match = re.search(chain._fromRegex, response, re.DOTALL)
+                                if match and len(match.groups()):
+                                    result = match.group(1)
                                 
-                                for toID in chain.getToIDRange():
-                                    for affectedUser in affectedUsers:
-                                        affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
+                            for toID in chain.getToIDRange():
+                                for affectedUser in affectedUsers:
+                                    affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
             index +=1
 
         # Grab all active roleIndexes that are checkboxed
@@ -903,12 +911,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     
             if not ignoreUser:
                 if not userEntry._index in messageEntry._userRuns:
-                    print "ERROR: HTTP Requests Failed During Run"
+                    print ("Unexpected Error: Results not found for Request #"
+                        + str(messageEntry._index) + " and User #" + str(userEntry._index))
                     return False
                 requestResponse = messageEntry._userRuns[userEntry._index]
                 response = requestResponse.getResponse()
                 if not response:
-                    print "ERROR: No HTTP Response (Likely Invalid Target Host)"
+                    # No Response: default to failed
                     return False
                 
                 resp = StringUtil.fromBytes(response)
@@ -1929,6 +1938,7 @@ class MessageTable(JTable):
         requestViewer.setMessage(requestResponse.getRequest(), True)
         if requestResponse.getResponse():
             responseViewer.setMessage(requestResponse.getResponse(), False)
+        if not original:
             requestTabs.setSelectedIndex(1)
 
         if original and index>=0:
@@ -1951,9 +1961,10 @@ class MessageTable(JTable):
         # For now it sounds like this does not need to be locked, since its only manual operations
         for messageIndex in self._viewerMap:
             requestViewer = self._viewerMap[messageIndex]
-            if requestViewer and requestViewer.isMessageModified(): # TODO BUG: this doesnt detect change body encoding or change request method
+            if requestViewer and requestViewer.isMessageModified():
                 messageEntry = self.getModel()._db.arrayOfMessages[messageIndex]
                 newMessage = requestViewer.getMessage()
+                # TODO save the response too? Downside is that the original may not match the response anymore
                 messageEntry._requestResponse = RequestResponseStored(self._extender, 
                     request=newMessage, 
                     httpService=messageEntry._requestResponse.getHttpService())                
@@ -2178,7 +2189,7 @@ class ChainTable(JTable):
             self.getColumnModel().getColumn(1).setMaxWidth(175);        
             self.getColumnModel().getColumn(2).setMinWidth(180);
             self.getColumnModel().getColumn(3).setMinWidth(160);
-            self.getColumnModel().getColumn(3).setMaxWidth(160);        
+            self.getColumnModel().getColumn(3).setMaxWidth(320);        
             self.getColumnModel().getColumn(4).setMinWidth(180);
             self.getColumnModel().getColumn(5).setMinWidth(150);
             self.getColumnModel().getColumn(5).setMaxWidth(270);        
