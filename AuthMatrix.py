@@ -1959,7 +1959,7 @@ class MessageTable(JTable):
 
         # Resize
         self.getColumnModel().getColumn(0).setMinWidth(30);
-        self.getColumnModel().getColumn(0).setMaxWidth(30);
+        self.getColumnModel().getColumn(0).setMaxWidth(45);
         self.getColumnModel().getColumn(1).setMinWidth(300);
         self.getColumnModel().getColumn(2).setMinWidth(150);
 
