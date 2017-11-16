@@ -568,6 +568,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     return
             fileName = f.getPath()
             # TODO Bug here.  Check if the value being written is 0 before opening
+            # TODO add a try catch here?
             jsonValue = self._db.getSaveableJson()
             if jsonValue:
                 fileout = open(fileName,'w')
@@ -1014,13 +1015,19 @@ class ModifyMessage():
 
     @staticmethod
     def chainReplace(toRegex, toValue, toArray):
+        # TODO clean up so that the input is headers+body and its called only once
         # TODO support encoding, including URL encode
         isBody = len(toArray)==1
-        to = "\r\n".join(toArray)
         if toRegex:
+            # BUG FIX: Geoff reported that if the regex ends at the newline on the last header,
+            # the regex fails.  Hacky solution is to add an extra newlines before the regex search
+            # and remove it after.
+            to = "\r\n".join(toArray)+"\r\n\r\n"
             match = re.search(toRegex, to, re.DOTALL)
             if match and len(match.groups()):
                 ret = (to[0:match.start(1)]+toValue+to[match.end(1):])
+                if ret[-4:] == "\r\n\r\n":
+                    ret = ret[:-4]
                 if isBody:
                     return [ret]
                 else:
