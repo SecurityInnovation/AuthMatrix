@@ -1469,8 +1469,8 @@ class MatrixDB():
                     "deleted":deleted,
                     "failureRegexMode":messageEntry._failureRegexMode if not deleted else None,
                     "runBase64ForUserID":{int(x): {
-                        "request": base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getRequest())),
-                        "response": base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getResponse()))}
+                        "request": None if not messageEntry._userRuns[x] or not messageEntry._userRuns[x].getRequest() else base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getRequest())),
+                        "response": None if not messageEntry._userRuns[x] or not messageEntry._userRuns[x].getResponse() else base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getResponse()))}
                         for x in messageEntry._userRuns.keys()} if not deleted else {},
                     "runResultForRoleID":messageEntry._roleResults if not deleted else {}
                 })
