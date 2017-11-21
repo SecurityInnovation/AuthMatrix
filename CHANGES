@@ -1,3 +1,13 @@
+v0.7.1 - 11/21/2017
+
+STATE FILE COMPATIBILITY - v0.5.2 and greater
+
+* Bug Fix - Issue in chain regex logic when grabbing the last HTTP Header before the body
+
+* Bug Fix - Issue with saving state returning a file of size zero if the state included any time'd out requests
+
+* Minor UI Changes
+
 v0.7 - 04/24/2017
 
 STATE FILE COMPATIBILITY - v0.5.2 and greater
