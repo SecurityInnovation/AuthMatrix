@@ -174,6 +174,44 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._selectedColumn = -1
                     # Redrawing the table happens in colorcode within the thread
 
+        class actionToggleEnableUser(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._userTable.getSelectedRows():
+                        usersArray = [selfExtender._db.getUserByRow(selfExtender._selectedRow)]
+                    else:
+                        usersArray = [selfExtender._db.getUserByRow(rowNum) for rowNum in selfExtender._userTable.getSelectedRows()]
+                    for userEntry in usersArray:
+                        userEntry.toggleEnabled()
+                    selfExtender._selectedColumn = -1
+                    selfExtender._userTable.redrawTable()
+
+        class actionToggleEnableMessage(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._messageTable.getSelectedRows():
+                        messagesArray = [selfExtender._db.getMessageByRow(selfExtender._selectedRow)]
+                    else:
+                        messagesArray = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
+                    for messageEntry in messagesArray:
+                        messageEntry.toggleEnabled()
+                    selfExtender._selectedColumn = -1
+                    selfExtender._messageTable.redrawTable()
+
+        class actionToggleEnableChain(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._chainTable.getSelectedRows():
+                        chainArray = [selfExtender._db.getChainByRow(selfExtender._selectedRow)]
+                    else:
+                        chainArray = [selfExtender._db.getChainByRow(rowNum) for rowNum in selfExtender._chainTable.getSelectedRows()]
+                    for chainEntry in chainArray:
+                        chainEntry.toggleEnabled()
+                    selfExtender._selectedColumn = -1
+                    selfExtender._chainTable.redrawTable()
+
+
+
         class actionRemoveMessage(ActionListener):
             def actionPerformed(self,e):
                 if selfExtender._selectedRow >= 0:
@@ -294,6 +332,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         messageRun = JMenuItem("Run Request(s)")
         messageRun.addActionListener(actionRunMessage())
         messagePopup.add(messageRun)
+        toggleEnabled = JMenuItem("Enable/Disable")
+        toggleEnabled.addActionListener(actionToggleEnableMessage())
+        messagePopup.add(toggleEnabled)
         messageRemove = JMenuItem("Remove Request(s)")
         messageRemove.addActionListener(actionRemoveMessage())
         messagePopup.add(messageRemove)
@@ -315,9 +356,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # User Table popup
         userPopup = JPopupMenu()
         addPopup(self._userTable,userPopup)
+        toggleEnabled = JMenuItem("Enable/Disable")
+        toggleEnabled.addActionListener(actionToggleEnableUser())
+        userPopup.add(toggleEnabled)
         userRemove = JMenuItem("Remove Users(s)")
         userRemove.addActionListener(actionRemoveUser())
         userPopup.add(userRemove)
+
 
         userHeaderPopup = JPopupMenu()
         addPopup(self._userTable.getTableHeader(),userHeaderPopup)
@@ -328,6 +373,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # Chain Table popup
         chainPopup = JPopupMenu()
         addPopup(self._chainTable,chainPopup)
+        toggleEnabled = JMenuItem("Enable/Disable")
+        toggleEnabled.addActionListener(actionToggleEnableChain())
+        chainPopup.add(toggleEnabled)
         chainRemove = JMenuItem("Remove Chain(s)")
         chainRemove.addActionListener(actionRemoveChain())
         chainPopup.add(chainRemove)
@@ -406,10 +454,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._topPane.setResizeWeight(0.85)
         bottomPane.setResizeWeight(0.95)
 
-        # Handles checkbox color coding
+        # Handles checkbox, regex, and enabled coloring
         # Must be bellow the customizeUiComponent calls
         self._messageTable.setDefaultRenderer(Boolean, SuccessBooleanRenderer(self._messageTable.getDefaultRenderer(Boolean), self._db))
         self._messageTable.setDefaultRenderer(str, RegexRenderer(self._messageTable.getDefaultRenderer(str), self._db))
+        self._userTable.setDefaultRenderer(str, UserEnabledRenderer(self._userTable.getDefaultRenderer(str), self._db))
+        self._userTable.setDefaultRenderer(Boolean, UserEnabledRenderer(self._userTable.getDefaultRenderer(Boolean), self._db))
+        self._chainTable.setDefaultRenderer(str, ChainEnabledRenderer(self._chainTable.getDefaultRenderer(str), self._db))
+
 
         # add the custom tab to Burp's UI
         callbacks.addSuiteTab(self)        
@@ -788,7 +840,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self.clearColorResults(indexes)
             # Run in order of row, not by index
             for message in self._db.getMessagesInOrderByRow():
-                if message._index in indexes:
+                # TODO (0.8): Run any dependencies first
+                # Only run if message is enabled and is in the selected indexes
+                if message._index in indexes and message.isEnabled():
                     self.runMessage(message._index)
 
         except:
@@ -823,91 +877,95 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         messageInfo = messageEntry._requestResponse
         requestInfo = self._helpers.analyzeRequest(messageInfo)
         reqBody = messageInfo.getRequest()[requestInfo.getBodyOffset():]
+
+
         for userIndex in self._db.getActiveUserIndexes():
             # Handle cancel button early exit here
             if self._runCancelled:
                 return
 
-
             userEntry = self._db.arrayOfUsers[userIndex]
-            newHeaders = ModifyMessage.getNewHeaders(requestInfo, userEntry._cookies, userEntry._headers)
-            newBody = reqBody
-
-            # Replace with Chain
-            for toRegex, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
-                newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
-                newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
-
-            # Replace with SV
-            # toValue = SV, toRegex = toRegex
-            for chain in [self._db.arrayOfChains[i] for i in self._db.getActiveChainIndexes()]:
-                svName = chain.getSVName()
-                if svName and messageIndex in chain.getToIDRange():
-                    # get toValue for correct source
-                    sourceUser = chain._sourceUser if chain._sourceUser>=0 else userIndex
-                    # Check that sourceUser is active
-                    if sourceUser in self._db.getActiveUserIndexes():
-                        toValue = self._db.getSVByName(svName).getValueForUserIndex(sourceUser)
-                        toRegex = chain._toRegex
-                        newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
-                        newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
-
-            # Replace Custom Special Types (i.e. Random)
-            newBody = StringUtil.toBytes(ModifyMessage.customReplace([StringUtil.fromBytes(newBody)])[0])
-            newHeaders = ModifyMessage.customReplace(newHeaders)
-
-            # Construct and send a message with the new headers
-            message = self._helpers.buildHttpMessage(newHeaders, newBody)
-
-
-            # Run with threading to timeout correctly   
-            tempRequestResponse.append(None)         
-            t = Thread(target=loadRequestResponse, args = [index,messageInfo.getHttpService(),message])
-            t.start()
-            t.join(self._db.LOAD_TIMEOUT)
-
-            # Create default requestResponse without response
-            requestResponse = RequestResponseStored(self, 
-                request=message, 
-                httpService=messageInfo.getHttpService())
-
-            if t.isAlive():
-                print "ERROR: Request Timeout for Request #"+str(messageIndex)+" and User #"+str(userIndex)
-            elif tempRequestResponse[index]:
-                requestResponse = RequestResponseStored(self,requestResponse=tempRequestResponse[index])
-            
-            messageEntry.addRunByUserIndex(userIndex, requestResponse)
-
-            # Get Chain Result
-            response = requestResponse.getResponse()
-            if not response:
-                print "ERROR: No HTTP Response for Request #"+str(messageIndex)+" and User #"+str(userIndex)
-            else:
-                response = StringUtil.fromBytes(response)
-                for chain in [self._db.arrayOfChains[c] for c in self._db.getActiveChainIndexes()]:
-                    # This wont have issues with SV because of the prefix never matching the index
-                    if str(chain._fromID) == str(messageIndex):
-                        # If a sourceUser is set, replace for all users' chain results
-                        # Else, replace each user's chain results individually
-                        replace = True
-                        affectedUsers = [userEntry]
-                        if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0:
-                            if str(chain._sourceUser) == str(userIndex):
-                                affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
-                            else:
-                                replace = False
-
-                        if replace:
-                            result = ""
-                            if chain._fromRegex:
-                                match = re.search(chain._fromRegex, response, re.DOTALL)
-                                if match and len(match.groups()):
-                                    result = match.group(1)
-                                
-                            for toID in chain.getToIDRange():
-                                for affectedUser in affectedUsers:
-                                    affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
-            index +=1
+            # Only run if the user is enabled
+            if userEntry.isEnabled():
+                newHeaders = ModifyMessage.getNewHeaders(requestInfo, userEntry._cookies, userEntry._headers)
+                newBody = reqBody
+    
+                # Replace with Chain
+                for toRegex, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
+                    newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
+                    newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
+    
+                # Replace with SV
+                # toValue = SV, toRegex = toRegex
+                for chain in [self._db.arrayOfChains[i] for i in self._db.getActiveChainIndexes()]:
+                    svName = chain.getSVName()
+                    # If the Chain Source exists, and this message is affected, and the chain is enabled
+                    if svName and messageIndex in chain.getToIDRange() and chain.isEnabled():
+                        # get toValue for correct source
+                        sourceUser = chain._sourceUser if chain._sourceUser>=0 else userIndex
+                        # Check that sourceUser is active
+                        if sourceUser in self._db.getActiveUserIndexes():
+                            toValue = self._db.getSVByName(svName).getValueForUserIndex(sourceUser)
+                            toRegex = chain._toRegex
+                            newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
+                            newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
+    
+                # Replace Custom Special Types (i.e. Random)
+                newBody = StringUtil.toBytes(ModifyMessage.customReplace([StringUtil.fromBytes(newBody)])[0])
+                newHeaders = ModifyMessage.customReplace(newHeaders)
+    
+                # Construct and send a message with the new headers
+                message = self._helpers.buildHttpMessage(newHeaders, newBody)
+    
+    
+                # Run with threading to timeout correctly   
+                tempRequestResponse.append(None)         
+                t = Thread(target=loadRequestResponse, args = [index,messageInfo.getHttpService(),message])
+                t.start()
+                t.join(self._db.LOAD_TIMEOUT)
+    
+                # Create default requestResponse without response
+                requestResponse = RequestResponseStored(self, 
+                    request=message, 
+                    httpService=messageInfo.getHttpService())
+    
+                if t.isAlive():
+                    print "ERROR: Request Timeout for Request #"+str(messageIndex)+" and User #"+str(userIndex)
+                elif tempRequestResponse[index]:
+                    requestResponse = RequestResponseStored(self,requestResponse=tempRequestResponse[index])
+                
+                messageEntry.addRunByUserIndex(userIndex, requestResponse)
+    
+                # Get Chain Result
+                response = requestResponse.getResponse()
+                if not response:
+                    print "ERROR: No HTTP Response for Request #"+str(messageIndex)+" and User #"+str(userIndex)
+                else:
+                    response = StringUtil.fromBytes(response)
+                    for chain in [self._db.arrayOfChains[c] for c in self._db.getActiveChainIndexes()]:
+                        # This wont have issues with SV because of the prefix never matching the index
+                        if str(chain._fromID) == str(messageIndex) and chain.isEnabled():
+                            # If a sourceUser is set, replace for all users' chain results
+                            # Else, replace each user's chain results individually
+                            replace = True
+                            affectedUsers = [userEntry]
+                            if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0:
+                                if str(chain._sourceUser) == str(userIndex):
+                                    affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
+                                else:
+                                    replace = False
+    
+                            if replace:
+                                result = ""
+                                if chain._fromRegex:
+                                    match = re.search(chain._fromRegex, response, re.DOTALL)
+                                    if match and len(match.groups()):
+                                        result = match.group(1)
+                                    
+                                for toID in chain.getToIDRange():
+                                    for affectedUser in affectedUsers:
+                                        affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
+                index +=1
 
         # Grab all active roleIndexes that are checkboxed
         activeCheckBoxedRoles = [index for index in messageEntry._roles.keys() if messageEntry._roles[index] and not self._db.arrayOfRoles[index].isDeleted()]
@@ -937,7 +995,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             # if user is not in this role, ignore it
             if not userEntry._roles[roleIndex]:
                 ignoreUser = True
-
+            elif not userEntry.isEnabled():
+                ignoreUser = True
             else:
                 # If user is in any other checked role, then ignore it
                 for index in self._db.getActiveRoleIndexes():
@@ -1096,8 +1155,9 @@ class MatrixDB():
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 6
         self.LOAD_TIMEOUT = 10.0
-        self.BURP_SELECTED_CELL_COLOR = Color(0xFFCD81)
-        self.BURP_ORANGE = Color(0xE58900)
+        #self.BURP_SELECTED_CELL_COLOR = Color(0xFFCD81) # Old Color Scheme
+        #self.BURP_SELECTED_CELL_COLOR = Color(0xFFC599) 
+        self.BURP_ORANGE = Color(0xE58900)# TODO (8.0): Update to be correct
 
         self.lock = Lock()
         self.arrayOfMessages = ArrayList()
@@ -1337,6 +1397,8 @@ class MatrixDB():
         self.lock.release()
 
     def loadJson(self, jsonText, extender):
+        # TODO (0.8): load enabled/ gracefully handle missing values
+
         # NOTE: Weird issue where saving serialized json for configs loaded from old states (pre v0.6.3)
         # doesn't use correct capitalization on bools.
         # This replacement might have weird results, but most are mitigated by using base64 encoding
@@ -1450,7 +1512,7 @@ class MatrixDB():
 
 
     def getSaveableJson(self):
-
+        # TODO (0.8): save enabled
         stateDict = {"version":AUTHMATRIX_VERSION,
         "deletedUserCount":self.deletedUserCount,
         "deletedRoleCount":self.deletedRoleCount,
@@ -2239,6 +2301,7 @@ class ChainTable(JTable):
 
 
 # For color-coding checkboxes in the message table
+# Also Grey when not enabled
 class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
     def __init__(self, defaultCellRender, db):
@@ -2264,46 +2327,50 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
         if column >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT:
             messageEntry = self._db.getMessageByRow(row)
             if messageEntry:
-                roleEntry = self._db.getRoleByColumn(column, 'm')
-                if roleEntry:
-                    roleIndex = roleEntry._index
-                    if not roleIndex in messageEntry._roleResults:
-                        if isSelected:
-                            cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
+                if messageEntry.isEnabled():
+                    roleEntry = self._db.getRoleByColumn(column, 'm')
+                    if roleEntry:
+                        roleIndex = roleEntry._index
+                        if not roleIndex in messageEntry._roleResults:
+                            if isSelected:
+                                cell.setBackground(table.getSelectionBackground())
+                            else:
+                                cell.setBackground(table.getBackground())
                         else:
-                            cell.setBackground(table.getBackground())
-                    else:
-                        # This site was used for generating color blends when selected (option 6 of 12)
-                        # http://meyerweb.com/eric/tools/color-blend/#FFCD81:00CCFF:10:hex
-                        sawExpectedResults = messageEntry._roleResults[roleIndex]
-                        checkboxChecked = messageEntry._roles[roleIndex]
-
-                        # NOTE: currently no way to detect false positive in failure mode
-                        # failureRegexMode = messageEntry.isFailureRegex()
-
-                        if sawExpectedResults:
-                            # Set Green if success
-                            if isSelected:
-                                cell.setBackground(Color(0xC8,0xE0,0x51))
+                            # This site was used for generating color blends when selected (option 6 of 12)
+                            # http://meyerweb.com/eric/tools/color-blend/#FFCD81:00CCFF:10:hex
+                            sawExpectedResults = messageEntry._roleResults[roleIndex]
+                            checkboxChecked = messageEntry._roles[roleIndex]
+    
+                            # NOTE: currently no way to detect false positive in failure mode
+                            # failureRegexMode = messageEntry.isFailureRegex()
+    
+                            if sawExpectedResults:
+                                # Set Green if success
+                                if isSelected:
+                                    cell.setBackground(Color(0xC8,0xE0,0x51))
+                                else:
+                                    cell.setBackground(Color(0x87,0xf7,0x17))
+                            elif checkboxChecked:
+                                # Set Blue if its probably a false positive
+                                if isSelected:
+                                    cell.setBackground(Color(0x8B, 0xCD, 0xBA))
+                                else:
+                                    cell.setBackground(Color(0x00,0xCC,0xFF))
                             else:
-                                cell.setBackground(Color(0x87,0xf7,0x17))
-                        elif checkboxChecked:
-                            # Set Blue if its probably a false positive
-                            if isSelected:
-                                cell.setBackground(Color(0x8B, 0xCD, 0xBA))
-                            else:
-                                cell.setBackground(Color(0x00,0xCC,0xFF))
-                        else:
-                            # Set Red if fail
-                            if isSelected:
-                                cell.setBackground(Color(0xFF, 0x87, 0x51))
-                            else:
-                                cell.setBackground(Color(0xFF, 0x32, 0x17))
+                                # Set Red if fail
+                                if isSelected:
+                                    cell.setBackground(Color(0xFF, 0x87, 0x51))
+                                else:
+                                    cell.setBackground(Color(0xFF, 0x32, 0x17))
+                else:
+                    cell.setBackground(Color.GRAY)
 
         return cell
       
 
 # For color-coding successregex in the message table
+# Also Grey when not enabled
 class RegexRenderer(JLabel, TableCellRenderer):
 
     def __init__(self, defaultCellRender, db):
@@ -2313,9 +2380,9 @@ class RegexRenderer(JLabel, TableCellRenderer):
     def getTableCellRendererComponent(self, table, value, isSelected, hasFocus, row, column):
         # Regex color
         cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+        messageEntry = self._db.getMessageByRow(row)
 
         if column == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
-            messageEntry = self._db.getMessageByRow(row)
             if messageEntry:
                 if messageEntry.isFailureRegex():
                     # Set Grey if failure mode
@@ -2325,17 +2392,56 @@ class RegexRenderer(JLabel, TableCellRenderer):
                         cell.setBackground(Color(0x99,0x99,0xCC))
                 else:
                     if isSelected:
-                        cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
+                        cell.setBackground(table.getSelectionBackground())
                     else:
                         cell.setBackground(table.getBackground())
         else:
             if isSelected:
-                cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
+                cell.setBackground(table.getSelectionBackground())
             else:
                 cell.setBackground(table.getBackground())
+        # Set grey if disabled
+        if messageEntry and not messageEntry.isEnabled():
+            cell.setBackground(Color.GRAY)
         return cell
 
+# Default Renderer checking User Table for Enabled
+class UserEnabledRenderer(TableCellRenderer):
+    def __init__(self, defaultCellRender, db):
+        self._defaultCellRender = defaultCellRender
+        self._db = db
 
+    def getTableCellRendererComponent(self, table, value, isSelected, hasFocus, row, column):
+        # Regex color
+        cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+        userEntry = self._db.getUserByRow(row)
+        if userEntry and not userEntry.isEnabled():
+            # TODO (0.8): differentiate selected and not selected
+            cell.setBackground(Color.GRAY)
+        elif isSelected:
+            cell.setBackground(table.getSelectionBackground())
+        else:
+            cell.setBackground(table.getBackground())
+        return cell
+
+# Default Renderer checking Chain Table for Enabled
+class ChainEnabledRenderer(TableCellRenderer):
+    def __init__(self, defaultCellRender, db):
+        self._defaultCellRender = defaultCellRender
+        self._db = db
+
+    def getTableCellRendererComponent(self, table, value, isSelected, hasFocus, row, column):
+        # Regex color
+        cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+        chainEntry = self._db.getChainByRow(row)
+        if chainEntry and not chainEntry.isEnabled():
+            # TODO (0.8): differentiate selected and not selected
+            cell.setBackground(Color.GRAY)
+        elif isSelected:
+            cell.setBackground(table.getSelectionBackground())
+        else:
+            cell.setBackground(table.getBackground())
+        return cell
 
 
 
@@ -2345,7 +2451,7 @@ class RegexRenderer(JLabel, TableCellRenderer):
 
 class MessageEntry:
 
-    def __init__(self, index, tableRow, requestResponse, name = "", roles = {}, regex = "", deleted = False, failureRegexMode = False):
+    def __init__(self, index, tableRow, requestResponse, name = "", roles = {}, regex = "", deleted = False, failureRegexMode = False, enabled = True):
         self._index = index
         self._tableRow = tableRow
         self._requestResponse = requestResponse
@@ -2356,6 +2462,7 @@ class MessageEntry:
         self._deleted = deleted
         self._userRuns = {}
         self._roleResults = {}
+        self._enabled = enabled
         return
 
     # Role are the index of the db Role array and a bool for whether the checkbox is default enabled or not
@@ -2392,9 +2499,16 @@ class MessageEntry:
         self._roleResults = {}
         self._userRuns = {}
 
+    def isEnabled(self):
+        return self._enabled
+
+    def toggleEnabled(self):
+        self._enabled = not self._enabled
+
+
 class UserEntry:
 
-    def __init__(self, index, tableRow, name, roles = {}, deleted=False, cookies="", headers = []):
+    def __init__(self, index, tableRow, name, roles = {}, deleted=False, cookies="", headers = [], enabled = True):
         self._index = index
         self._name = name
         self._roles = roles.copy()
@@ -2403,6 +2517,7 @@ class UserEntry:
         self._cookies = cookies
         self._headers = headers
         self._chainResults = {}
+        self._enabled = enabled
         return
 
     # Roles are the index of the db role array and a bool for whether the checkbox is default enabled or not
@@ -2435,6 +2550,14 @@ class UserEntry:
     def getTableRow(self):
         return self._tableRow
 
+    def isEnabled(self):
+        return self._enabled
+
+    def toggleEnabled(self):
+        self._enabled = not self._enabled
+
+
+
 class RoleEntry:
 
     def __init__(self,index,columnIndex,name,deleted=False,singleUser=False):
@@ -2463,7 +2586,7 @@ class RoleEntry:
 
 class ChainEntry:
 
-    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser=-1):
+    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser=-1, enabled=True):
         self._index = index
         self._fromID = fromID
         self._fromRegex = fromRegex
@@ -2477,6 +2600,7 @@ class ChainEntry:
         self._fromEnd = ""
         self._toStart = ""
         self._toEnd = ""
+        self._enabled = enabled
         return
 
     def setDeleted(self):
@@ -2546,6 +2670,13 @@ class ChainEntry:
         if self._fromID.startswith("SV_"):
             return self._fromID[3:]
         return None
+
+    def isEnabled(self):
+        return self._enabled
+
+    def toggleEnabled(self):
+        self._enabled = not self._enabled
+
 
 class SVEntry:
 
