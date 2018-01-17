@@ -505,7 +505,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     self.currentUser._cookies = cookieVal
 
                 self.extender._userTable.redrawTable()
-                self.highlightTab()
+                self.extender.highlightTab()
 
         ret = []
         messages = invocation.getSelectedMessages()
