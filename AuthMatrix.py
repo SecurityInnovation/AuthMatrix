@@ -51,6 +51,7 @@ from javax.swing import JSeparator;
 from javax.swing import SwingConstants;
 from javax.swing import JList
 from javax.swing import AbstractCellEditor
+from javax.swing import Timer
 from java.awt.datatransfer import StringSelection;
 from java.awt.datatransfer import DataFlavor;
 from javax.swing.table import AbstractTableModel;
@@ -80,6 +81,7 @@ import string
 
 
 AUTHMATRIX_VERSION = "0.7.1"
+
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
     
@@ -427,12 +429,36 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def getUiComponent(self):
         return self._splitpane
        
+    def highlightTab(self):
+        currentPane = self._splitpane
+        previousPane = currentPane
+        while currentPane and not isinstance(currentPane, JTabbedPane):
+            previousPane = currentPane
+            currentPane = currentPane.getParent()
+        if currentPane:
+            index = currentPane.indexOfComponent(previousPane)
+            # TODO user old background instead of black
+            #oldBackground = currentPane.getBackgroundAt(index)
+            currentPane.setBackgroundAt(index,self._db.BURP_ORANGE)
+
+            class setColorBackActionListener(ActionListener):
+                def actionPerformed(self, e):
+                    currentPane.setBackgroundAt(index,Color.BLACK)
+                    
+            timer = Timer(5000, setColorBackActionListener())
+            timer.setRepeats(False)
+            timer.start()
+
+
 
     ##
     ## Creates the sendto tab in other areas of Burp
     ##
 
     def createMenuItems(self, invocation):
+
+        
+
 
         def addRequestsToTab(e):
             for messageInfo in messages:
@@ -451,6 +477,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 messageIndex = self._db.createNewMessage(RequestResponseStored(self,requestResponse=messageInfo), name, regex)
             self._messageTable.redrawTable()
             self._chainTable.redrawTable()
+            self.highlightTab()
+
 
         class UserCookiesActionListener(ActionListener):
             def __init__(self, currentUser, extender):
@@ -477,6 +505,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     self.currentUser._cookies = cookieVal
 
                 self.extender._userTable.redrawTable()
+                self.highlightTab()
 
         ret = []
         messages = invocation.getSelectedMessages()
@@ -1067,7 +1096,8 @@ class MatrixDB():
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 6
         self.LOAD_TIMEOUT = 10.0
-        self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
+        self.BURP_SELECTED_CELL_COLOR = Color(0xFFCD81)
+        self.BURP_ORANGE = Color(0xE58900)
 
         self.lock = Lock()
         self.arrayOfMessages = ArrayList()
