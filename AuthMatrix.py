@@ -360,7 +360,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # User Table popup
         userPopup = JPopupMenu()
         addPopup(self._userTable,userPopup)
-        toggleEnabled = JMenuItem("Enable/Disable")
+        toggleEnabled = JMenuItem("Disable/Enable User(s)")
         toggleEnabled.addActionListener(actionToggleEnableUser())
         userPopup.add(toggleEnabled)
         userRemove = JMenuItem("Remove Users(s)")
@@ -377,7 +377,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # Chain Table popup
         chainPopup = JPopupMenu()
         addPopup(self._chainTable,chainPopup)
-        toggleEnabled = JMenuItem("Enable/Disable")
+        toggleEnabled = JMenuItem("Disable/Enable Chain(s)")
         toggleEnabled.addActionListener(actionToggleEnableChain())
         chainPopup.add(toggleEnabled)
         chainRemove = JMenuItem("Remove Chain(s)")
@@ -580,7 +580,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
             if len(messages)==1:
                 # Send cookies to user:
-                for user in [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]:
+                for user in self._db.getUsersInOrderByRow():
                     menuItem = JMenuItem("Send cookies to AuthMatrix user: "+user._name);
                     menuItem.addActionListener(UserCookiesActionListener(user, self))
                     ret.append(menuItem)
@@ -955,7 +955,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             affectedUsers = [userEntry]
                             if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0:
                                 if str(chain._sourceUser) == str(userIndex):
-                                    affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
+                                    affectedUsers = self._db.getUsersInOrderByRow()
                                 else:
                                     replace = False
     
@@ -990,7 +990,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._messageTable.redrawTable()
 
     def checkResult(self, messageEntry, roleIndex, activeCheckBoxedRoles):
-        for userEntry in [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]:
+        for userEntry in self._db.getUsersInOrderByRow():
 
             ignoreUser = False
 
@@ -2252,7 +2252,7 @@ class ChainTable(JTable):
             db = self.getModel()._db
 
             # Chain From comboboxes
-            users = [self.getModel().chainFromDefault]+[db.arrayOfUsers[x]._name for x in db.getActiveUserIndexes()]
+            users = [self.getModel().chainFromDefault]+[userEntry._name for userEntry in db.getUsersInOrderByRow()]
             usersComboBox = JComboBox(users)
             usersComboBoxEditor = DefaultCellEditor(usersComboBox)
             self.getColumnModel().getColumn(5).setCellEditor(usersComboBoxEditor)
@@ -2457,6 +2457,7 @@ class UserEnabledRenderer(TableCellRenderer):
             cell.setBackground(table.getBackground())
         return cell
 
+# TODO (0.8): combine these classes
 # Default Renderer checking Chain Table for Enabled
 class ChainEnabledRenderer(TableCellRenderer):
     def __init__(self, defaultCellRender, db):
