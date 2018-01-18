@@ -127,8 +127,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # Set Messages to reorderable
         self._messageTable.setDragEnabled(True)
         self._messageTable.setDropMode(DropMode.INSERT_ROWS)
-        self._messageTable.setTransferHandler(MessageTableRowTransferHandler(self._messageTable))                
+        self._messageTable.setTransferHandler(RowTransferHandler(self._messageTable))                
 
+        # Set Users to reorderable
+        self._userTable.setDragEnabled(True)
+        self._userTable.setDropMode(DropMode.INSERT_ROWS)
+        self._userTable.setTransferHandler(RowTransferHandler(self._userTable))                
 
 
 
@@ -332,7 +336,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         messageRun = JMenuItem("Run Request(s)")
         messageRun.addActionListener(actionRunMessage())
         messagePopup.add(messageRun)
-        toggleEnabled = JMenuItem("Enable/Disable")
+        toggleEnabled = JMenuItem("Disable/Enable Request(s)")
         toggleEnabled.addActionListener(actionToggleEnableMessage())
         messagePopup.add(toggleEnabled)
         messageRemove = JMenuItem("Remove Request(s)")
@@ -879,7 +883,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         reqBody = messageInfo.getRequest()[requestInfo.getBodyOffset():]
 
 
-        for userIndex in self._db.getActiveUserIndexes():
+        for userIndex in [userEntry._index for userEntry in self._db.getUsersInOrderByRow()]:
             # Handle cancel button early exit here
             if self._runCancelled:
                 return
@@ -1719,6 +1723,12 @@ class MatrixDB():
             messages.append(self.getMessageByRow(i))
         return messages
 
+    def getUsersInOrderByRow(self):
+        users = []
+        for i in range(self.getActiveUserCount()):
+            users.append(self.getUserByRow(i))
+        return users
+
     def moveMessageToRow(self, fromRow, toRow):
         self.lock.acquire()
         messages = self.getMessagesInOrderByRow()
@@ -1731,8 +1741,22 @@ class MatrixDB():
             messages[fromRow].setTableRow(toRow-1)
             for i in range(fromRow+1,toRow):
                 messages[i].setTableRow(i-1)
-
         self.lock.release()
+
+    def moveUserToRow(self, fromRow, toRow):
+        self.lock.acquire()
+        users = self.getUsersInOrderByRow()
+        if fromRow > toRow:
+            users[fromRow].setTableRow(toRow)
+            for i in range(toRow,fromRow):
+                users[i].setTableRow(i+1)
+
+        elif toRow > fromRow:
+            users[fromRow].setTableRow(toRow-1)
+            for i in range(fromRow+1,toRow):
+                users[i].setTableRow(i-1)
+        self.lock.release()
+
 
     def clearAllChainResults(self):
         for i in self.getActiveUserIndexes():
@@ -2020,11 +2044,12 @@ class MessageTable(JTable):
         originalTab = self.createRequestTabs(selectedMessage._requestResponse, True, selectedMessage._index)
         originalTab.setSelectedIndex(0)
         self._extender._tabs.addTab("Original",originalTab)
-        for userIndex in selectedMessage._userRuns.keys():
-            if not self.getModel()._db.arrayOfUsers[userIndex].isDeleted():
-                tabname = str(self.getModel()._db.arrayOfUsers[userIndex]._name)
-                self._extender._tabs.addTab(tabname,self.createRequestTabs(selectedMessage._userRuns[userIndex]))
-                
+
+        for userEntry in self.getModel()._db.getUsersInOrderByRow():
+            if userEntry._index in selectedMessage._userRuns.keys():
+                tabname = str(userEntry._name)
+                self._extender._tabs.addTab(tabname,self.createRequestTabs(selectedMessage._userRuns[userEntry._index]))
+                                
         JTable.changeSelection(self, row, col, toggle, extend)
         return
 
@@ -2364,7 +2389,10 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
                                 else:
                                     cell.setBackground(Color(0xFF, 0x32, 0x17))
                 else:
-                    cell.setBackground(Color.GRAY)
+                    if isSelected:
+                        cell.setBackground(Color(0xD1,0xB5,0xA3))
+                    else:
+                        cell.setBackground(Color.GRAY)
 
         return cell
       
@@ -2402,7 +2430,10 @@ class RegexRenderer(JLabel, TableCellRenderer):
                 cell.setBackground(table.getBackground())
         # Set grey if disabled
         if messageEntry and not messageEntry.isEnabled():
-            cell.setBackground(Color.GRAY)
+            if isSelected:
+                cell.setBackground(Color(0xD1,0xB5,0xA3))
+            else:
+                cell.setBackground(Color.GRAY)
         return cell
 
 # Default Renderer checking User Table for Enabled
@@ -2416,8 +2447,10 @@ class UserEnabledRenderer(TableCellRenderer):
         cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
         userEntry = self._db.getUserByRow(row)
         if userEntry and not userEntry.isEnabled():
-            # TODO (0.8): differentiate selected and not selected
-            cell.setBackground(Color.GRAY)
+            if isSelected:
+                cell.setBackground(Color(0xD1,0xB5,0xA3))
+            else:
+                cell.setBackground(Color.GRAY)
         elif isSelected:
             cell.setBackground(table.getSelectionBackground())
         else:
@@ -2435,8 +2468,10 @@ class ChainEnabledRenderer(TableCellRenderer):
         cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
         chainEntry = self._db.getChainByRow(row)
         if chainEntry and not chainEntry.isEnabled():
-            # TODO (0.8): differentiate selected and not selected
-            cell.setBackground(Color.GRAY)
+            if isSelected:
+                cell.setBackground(Color(0xD1,0xB5,0xA3))
+            else:
+                cell.setBackground(Color.GRAY)
         elif isSelected:
             cell.setBackground(table.getSelectionBackground())
         else:
@@ -2767,7 +2802,7 @@ class RequestResponseStored(IHttpRequestResponse):
 ## Drag and Drop
 ##
 
-class MessageTableRowTransferHandler(TransferHandler):
+class RowTransferHandler(TransferHandler):
 
     def __init__(self, table):
         self._table = table
@@ -2797,7 +2832,13 @@ class MessageTableRowTransferHandler(TransferHandler):
             index = tablemax
 
         rowFrom = info.getTransferable().getTransferData(DataFlavor.stringFlavor)
-        self._table.getModel()._db.moveMessageToRow(int(rowFrom), int(index))
+
+        if isinstance(self._table, MessageTable):
+            self._table.getModel()._db.moveMessageToRow(int(rowFrom), int(index))
+        elif isinstance(self._table, UserTable):
+            self._table.getModel()._db.moveUserToRow(int(rowFrom), int(index))
+
+
         return True
 
 
