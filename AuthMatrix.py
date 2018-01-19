@@ -843,11 +843,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 indexes = self._db.getActiveMessageIndexes()
             self.clearColorResults(indexes)
             # Run in order of row, not by index
+            messagesThatHaveRun = []
             for message in self._db.getMessagesInOrderByRow():
-                # TODO (0.8): Run any dependencies first
-                # Only run if message is enabled and is in the selected indexes
-                if message._index in indexes and message.isEnabled():
-                    self.runMessage(message._index)
+                # Only run if message is in the selected indexes (NOTE: dependencies will be run even if not selected)
+                if message._index in indexes:
+                    messagesThatHaveRun = self.runMessageAndDependencies(message._index, messagesThatHaveRun, [])
+                    #self.runMessage(message._index)
 
         except:
             traceback.print_exc(file=self._callbacks.getStderr())
@@ -855,6 +856,32 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self.lockButtons(False)
             self._db.lock.release()
             self._messageTable.redrawTable()
+
+    def runMessageAndDependencies(self, messageIndex, messagesThatHaveRun, recursionCheckArray):
+        messageEntry = self._db.arrayOfMessages[messageIndex]
+        updatedMessagesThatHaveRun = messagesThatHaveRun[:]
+        updatedRecursionCheckArray = recursionCheckArray[:]
+
+        if messageIndex in updatedRecursionCheckArray:
+            print "Error: Recursion detected in message chains: "+"->".join([str(i) for i in updatedRecursionCheckArray])+"->"+str(messageIndex)
+
+        elif (messageIndex not in updatedMessagesThatHaveRun 
+            and messageEntry.isEnabled() 
+            and messageIndex in self._db.getActiveMessageIndexes()):
+                updatedRecursionCheckArray.append(messageIndex)
+                for chainIndex in self._db.getActiveChainIndexes():
+                    # Run any dependencies first
+                    chainEntry = self._db.arrayOfChains[chainIndex]
+                    if (messageIndex in chainEntry.getToIDRange() 
+                        and chainEntry.isEnabled() 
+                        and str(chainEntry._fromID).isdigit() 
+                        and int(chainEntry._fromID) >= 0):
+                            updatedMessagesThatHaveRun = self.runMessageAndDependencies(int(chainEntry._fromID), updatedMessagesThatHaveRun, updatedRecursionCheckArray)
+                self.runMessage(messageIndex)
+                print messageIndex
+                updatedMessagesThatHaveRun.append(messageIndex)
+
+        return updatedMessagesThatHaveRun
 
 
     def runMessage(self, messageIndex):
@@ -953,7 +980,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             # Else, replace each user's chain results individually
                             replace = True
                             affectedUsers = [userEntry]
-                            if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0:
+                            if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0: # TODO (0.8): why .isdigit()? Can this line just be removed
                                 if str(chain._sourceUser) == str(userIndex):
                                     affectedUsers = self._db.getUsersInOrderByRow()
                                 else:
