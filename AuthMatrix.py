@@ -1186,9 +1186,7 @@ class MatrixDB():
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
         self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 6
         self.LOAD_TIMEOUT = 10.0
-        #self.BURP_SELECTED_CELL_COLOR = Color(0xFFCD81) # Old Color Scheme
-        #self.BURP_SELECTED_CELL_COLOR = Color(0xFFC599) 
-        self.BURP_ORANGE = Color(0xE58900)# TODO (8.0): Update to be correct
+        self.BURP_ORANGE = Color(0xff6633)# TODO (8.0): Update to be correct
 
         self.lock = Lock()
         self.arrayOfMessages = ArrayList()
