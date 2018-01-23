@@ -1199,6 +1199,7 @@ class MatrixDB():
         self.deletedChainCount = 0
         self.arrayOfSVs = ArrayList()
         self.headerCount = 0
+        self.arrayOfRegexes = []
 
 
     # Returns the index of the user, whether its new or not
@@ -1293,6 +1294,11 @@ class MatrixDB():
         for roleIndex in self.getActiveRoleIndexes():
             self.arrayOfMessages[messageIndex].addRoleByIndex(roleIndex)
 
+        # Add regex to array if its new
+        if regex and regex not in self.arrayOfRegexes:
+            self.arrayOfRegexes.append(regex)
+
+
         self.lock.release()
         return messageIndex
 
@@ -1353,6 +1359,7 @@ class MatrixDB():
         self.deletedChainCount = 0 # Updated with chain entries below in arrayOfUsers
         self.arrayOfSVs = ArrayList()
         self.headerCount = 1 # Legacy states had one header only
+        self.arrayOfRegexes = []
 
         for message in db.arrayOfMessages:
             if message._successRegex.startswith(FAILURE_REGEX_SERIALIZE_CODE):
@@ -1426,8 +1433,6 @@ class MatrixDB():
         self.lock.release()
 
     def loadJson(self, jsonText, extender):
-        # TODO (0.8): load enabled/ gracefully handle missing values
-
         # NOTE: Weird issue where saving serialized json for configs loaded from old states (pre v0.6.3)
         # doesn't use correct capitalization on bools.
         # This replacement might have weird results, but most are mitigated by using base64 encoding
@@ -1442,15 +1447,12 @@ class MatrixDB():
 
         self.lock.acquire()
 
-
-
-
-
         self.arrayOfUsers = ArrayList()
         self.arrayOfRoles = ArrayList()
         self.arrayOfMessages = ArrayList()
         self.arrayOfChains = ArrayList()
         self.arrayOfSVs = ArrayList()
+        self.arrayOfRegexes = []
         # As of 0.8 these values are filled in from each array
         self.deletedUserCount = 0
         self.deletedRoleCount = 0
@@ -1493,9 +1495,6 @@ class MatrixDB():
             # Suppport old and new header versions
             if "headersBase64" in userEntry:
                 headers = [base64.b64decode(x) for x in userEntry["headersBase64"]]
-                # Moved to SanityCheck
-                #if not deleted:
-                #    assert(len(headers)==self.headerCount)
             elif "headerBase64" in userEntry and self.headerCount == 1:
                 headers = [base64.b64decode(userEntry["headerBase64"])]
             else:     
@@ -1520,6 +1519,11 @@ class MatrixDB():
             if deleted:
                 self.deletedMessageCount += 1
 
+            regex = "" if "regexBase64" not in messageEntry else base64.b64decode(messageEntry["regexBase64"])
+
+            if regex and regex not in self.arrayOfRegexes:
+                self.arrayOfRegexes.append(regex)
+
             requestResponse = None if deleted else RequestResponseStored(
                     extender,
                     messageEntry["host"],
@@ -1533,7 +1537,7 @@ class MatrixDB():
                 requestResponse,
                 messageEntry["name"], 
                 {int(x): messageEntry["roles"][x] for x in messageEntry["roles"].keys()}, # convert keys to ints
-                regex = "" if "regexBase64" not in messageEntry else base64.b64decode(messageEntry["regexBase64"]), 
+                regex = regex, 
                 deleted = deleted, 
                 failureRegexMode = False if "failureRegexMode" not in messageEntry else messageEntry["failureRegexMode"],
                 enabled = True if "enabled" not in messageEntry else messageEntry["enabled"]
@@ -1567,7 +1571,6 @@ class MatrixDB():
             print "Error parsing state file: "+sanityResult
             self.clear()
 
-        
 
 
     def sanityCheck(self):
@@ -1648,10 +1651,6 @@ class MatrixDB():
 
     def getSaveableJson(self):
         stateDict = {"version":AUTHMATRIX_VERSION,
-        "deletedUserCount":self.deletedUserCount,
-        "deletedRoleCount":self.deletedRoleCount,
-        "deletedMessageCount":self.deletedMessageCount,
-        "deletedChainCount":self.deletedChainCount,
         "headerCount":self.headerCount}
 
         stateDict["arrayOfRoles"] = []
@@ -2120,6 +2119,10 @@ class MessageTableModel(AbstractTableModel):
                 messageEntry._name = val
             elif col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
                 messageEntry._regex = val
+                # Add this value to the array
+                if val and val not in self._db.arrayOfRegexes:
+                    self._db.arrayOfRegexes.append(val)
+                # TODO (0.8): Remove unused Regexes from that list
             else:
                 roleIndex = self._db.getRoleByColumn(col, 'm')._index
                 messageEntry.addRoleByIndex(roleIndex,val)
@@ -2133,6 +2136,10 @@ class MessageTableModel(AbstractTableModel):
                 # Backup option
                 # Update entire table since it affects color
                 # self.fireTableDataChanged()
+
+            # Refresh table so that combobox updates
+            self._extender._messageTable.redrawTable()
+
 
     # Set checkboxes editable
     def isCellEditable(self, row, col):
@@ -2213,6 +2220,16 @@ class MessageTable(JTable):
         # NOTE: this is prob ineffecient but it should catchall for changes to the table
         self.getModel().fireTableStructureChanged()
         self.getModel().fireTableDataChanged()
+
+        db = self.getModel()._db
+
+        # Regex comboboxes
+        regexComboBox = JComboBox(db.arrayOfRegexes)
+        regexComboBox.setEditable(True)
+        regexComboBoxEditor = DefaultCellEditor(regexComboBox)
+        self.getColumnModel().getColumn(2).setCellEditor(regexComboBoxEditor)
+
+
 
         # Resize
         self.getColumnModel().getColumn(0).setMinWidth(30);
