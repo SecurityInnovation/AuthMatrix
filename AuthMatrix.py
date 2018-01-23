@@ -878,7 +878,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         and int(chainEntry._fromID) >= 0):
                             updatedMessagesThatHaveRun = self.runMessageAndDependencies(int(chainEntry._fromID), updatedMessagesThatHaveRun, updatedRecursionCheckArray)
                 self.runMessage(messageIndex)
-                print messageIndex
+                # print messageIndex
                 updatedMessagesThatHaveRun.append(messageIndex)
 
         return updatedMessagesThatHaveRun
@@ -1441,15 +1441,21 @@ class MatrixDB():
             return
 
         self.lock.acquire()
+
+
+
+
+
         self.arrayOfUsers = ArrayList()
         self.arrayOfRoles = ArrayList()
         self.arrayOfMessages = ArrayList()
         self.arrayOfChains = ArrayList()
-        self.deletedUserCount = stateDict["deletedUserCount"]
-        self.deletedRoleCount = stateDict["deletedRoleCount"]
-        self.deletedMessageCount = stateDict["deletedMessageCount"]
-        self.deletedChainCount = stateDict["deletedChainCount"]
         self.arrayOfSVs = ArrayList()
+        # As of 0.8 these values are filled in from each array
+        self.deletedUserCount = 0
+        self.deletedRoleCount = 0
+        self.deletedMessageCount = 0
+        self.deletedChainCount = 0
 
         self.headerCount = 1
         if version >= "0.7":
@@ -1462,46 +1468,59 @@ class MatrixDB():
                         {int(x): svEntry["userValues"][x] for x in svEntry["userValues"].keys()}, # convert keys to ints
                         ))
 
+        # (self,index,columnIndex,name,deleted=False,singleUser=False):
         for roleEntry in stateDict["arrayOfRoles"]:
-            # Version: singleUser type roles added in v0.7
-            if version < "0.7":
-                singleUser = False
-            else:
-                singleUser = roleEntry["singleUser"]
+            deleted = False if "deleted" not in roleEntry else roleEntry["deleted"]
+            if deleted:
+                self.deletedRoleCount += 1
 
             self.arrayOfRoles.add(RoleEntry(
                 roleEntry["index"],
                 roleEntry["column"],
                 roleEntry["name"],
-                roleEntry["deleted"],
-                singleUser))
+                deleted = deleted,
+                singleUser = False if version < "0.7" or "singleUser" not in roleEntry else roleEntry["singleUser"]
+                ))
 
 
+        # NOTE: leaving out chainResults
+        # (self, index, tableRow, name, roles = {}, deleted=False, cookies="", headers = [], enabled = True):
         for userEntry in stateDict["arrayOfUsers"]:
+            deleted = False if "deleted" not in userEntry else userEntry["deleted"]
+            if deleted:
+                self.deletedUserCount += 1
 
             # Suppport old and new header versions
             if "headersBase64" in userEntry:
                 headers = [base64.b64decode(x) for x in userEntry["headersBase64"]]
-                if not userEntry["deleted"]:
-                    assert(len(headers)==self.headerCount)
-            elif "headerBase64" in userEntry and self.headerCount ==1:
+                # Moved to SanityCheck
+                #if not deleted:
+                #    assert(len(headers)==self.headerCount)
+            elif "headerBase64" in userEntry and self.headerCount == 1:
                 headers = [base64.b64decode(userEntry["headerBase64"])]
             else:     
                 headers = [""]*self.headerCount
+
 
             self.arrayOfUsers.add(UserEntry(
                 userEntry["index"],
                 userEntry["tableRow"],
                 userEntry["name"],
                 {int(x): userEntry["roles"][x] for x in userEntry["roles"].keys()}, # convert keys to ints
-                userEntry["deleted"],
-                base64.b64decode(userEntry["cookiesBase64"]),
-                headers=headers))
+                deleted = deleted,
+                cookies = "" if "cookiesBase64" not in userEntry else base64.b64decode(userEntry["cookiesBase64"]),
+                headers = headers,
+                enabled = True if "enabled" not in userEntry else userEntry["enabled"]
+                ))
 
-        # NOTE: leaving out chainResults
-        
+        # NOTE leaving out roleResults and userRuns (need to convert keys)
+        # (self, index, tableRow, requestResponse, name = "", roles = {}, regex = "", deleted = False, failureRegexMode = False, enabled = True):
         for messageEntry in stateDict["arrayOfMessages"]:
-            requestResponse = None if messageEntry["deleted"] else RequestResponseStored(
+            deleted = False if "deleted" not in messageEntry else messageEntry["deleted"]
+            if deleted:
+                self.deletedMessageCount += 1
+
+            requestResponse = None if deleted else RequestResponseStored(
                     extender,
                     messageEntry["host"],
                     messageEntry["port"],
@@ -1514,34 +1533,120 @@ class MatrixDB():
                 requestResponse,
                 messageEntry["name"], 
                 {int(x): messageEntry["roles"][x] for x in messageEntry["roles"].keys()}, # convert keys to ints
-                base64.b64decode(messageEntry["regexBase64"]), 
-                messageEntry["deleted"], 
-                messageEntry["failureRegexMode"]))
+                regex = "" if "regexBase64" not in messageEntry else base64.b64decode(messageEntry["regexBase64"]), 
+                deleted = deleted, 
+                failureRegexMode = False if "failureRegexMode" not in messageEntry else messageEntry["failureRegexMode"],
+                enabled = True if "enabled" not in messageEntry else messageEntry["enabled"]
+                ))
 
-        # TODO roleResults and userRuns (need to convert keys)
 
+        # NOTE: leaving out fromStart, fromEnd, toStart, toEnd
         for chainEntry in stateDict["arrayOfChains"]:
+            deleted = False if "deleted" not in chainEntry else chainEntry["deleted"]
+            if deleted:
+                self.deletedChainCount += 1
+
             self.arrayOfChains.add(ChainEntry(
                 chainEntry["index"],
                 chainEntry["tableRow"],
-                chainEntry["name"],
-                chainEntry["fromID"],
-                base64.b64decode(chainEntry["fromRegexBase64"]),
-                chainEntry["toID"],
-                base64.b64decode(chainEntry["toRegexBase64"]),
-                chainEntry["deleted"],
-                chainEntry["sourceUser"]
+                name = "" if "name" not in chainEntry else chainEntry["name"],
+                fromID = "" if "fromID" not in chainEntry else chainEntry["fromID"],
+                fromRegex = "" if "fromRegexBase64" not in chainEntry else base64.b64decode(chainEntry["fromRegexBase64"]),
+                toID = "" if "toID" not in chainEntry else chainEntry["toID"],
+                toRegex = "" if "toRegexBase64" not in chainEntry else base64.b64decode(chainEntry["toRegexBase64"]),
+                deleted = deleted,
+                sourceUser = -1 if "sourceUser" not in chainEntry else chainEntry["sourceUser"],
+                enabled = True if "enabled" not in chainEntry else chainEntry["enabled"]
                 ))
         
-        # NOTE: leaving out fromStart, fromEnd, toStart, toEnd
-
-
         self.lock.release()
 
+        # Sanity checks
+        sanityResult = self.sanityCheck()
+        if sanityResult:
+            print "Error parsing state file: "+sanityResult
+            self.clear()
+
+        
+
+
+    def sanityCheck(self):
+        try:
+            # Returns an error string if the DB is in a corrupt state, else returns None
+            userIndexes = self.getActiveUserIndexes() 
+            roleIndexes = self.getActiveRoleIndexes()
+            messageIndexes = self.getActiveMessageIndexes()
+            chainIndexes = self.getActiveChainIndexes()
+    
+            # Index Checks
+            for indexes, currentArray, deletedCount in [
+                (userIndexes, self.arrayOfUsers, self.deletedUserCount),
+                (roleIndexes, self.arrayOfRoles, self.deletedRoleCount),
+                (messageIndexes, self.arrayOfMessages, self.deletedMessageCount),
+                (chainIndexes, self.arrayOfChains, self.deletedChainCount)]:
+                    # Check that indexes are all unique
+                    if len(indexes) > len(set(indexes)):
+                        return "Not All Indexes are Unique."
+                    # Check that the DB array has the correct number of items
+                    if len(currentArray) != len(indexes) + deletedCount:
+                        return "Array found with incorrect number of items."
+                    for currentIndex in indexes:
+                        if currentIndex < 0:
+                            return "Negative Index Found."
+                        # Check that all index values are below the length of active+deleted
+                        if currentIndex >= len(indexes)+deletedCount:
+                            return "Index Higher than Total Active + Deleted."
+                        # Check that the indexes within the array match the index of the Entry
+                        if currentIndex != currentArray[currentIndex]._index:
+                            return "Entries in the State File Arrays must be in order by index"
+    
+            # Row Checks
+            for indexes, currentArray in [             
+                (userIndexes, self.arrayOfUsers),
+                (messageIndexes, self.arrayOfMessages),
+                (chainIndexes, self.arrayOfChains)]:
+                    rowList = [currentArray[currentIndex].getTableRow() for currentIndex in indexes]
+                    # Check that the rows for a given table are all unique
+                    if len(rowList) > len(set(rowList)):
+                        return "Not all rows for a given table are unique."
+                    for row in rowList:
+                        # Check that rows are within appropriate bounds
+                        if row >= len(indexes) or row <0:
+                            return "Row out of bounds."
+    
+            # Column Checks
+            columnList = [self.arrayOfRoles[currentIndex].getColumn() for currentIndex in roleIndexes]
+            if len(columnList) > len(set(columnList)):
+                return "Not all columns for Roles array are unique."
+            for column in columnList:
+                if column < 0 or column >= len(roleIndexes):
+                    return "Column out of bounds."
+    
+            # Custom Headers checks
+            for userIndex in userIndexes:
+                if len(self.arrayOfUsers[userIndex]._headers) != self.headerCount:
+                    return "Incorrect Number of Headers for a User.  Must be "+str(self.headerCount)
+    
+            # Role Assignment Checks
+            for indexes, currentArray in [             
+                (userIndexes, self.arrayOfUsers),
+                (messageIndexes, self.arrayOfMessages)]:
+                    for index in indexes:
+                        # Check that all keys are unique (might be redundant)
+                        roleKeys = currentArray[index]._roles.keys()
+                        if len(roleKeys) > len(set(roleKeys)):
+                            return "Duplicate Keys on Roles Map"
+                        # Check that all active roles are covered in that items map
+                        for roleIndex in roleIndexes:
+                            if roleIndex not in roleKeys:
+                                return "Missing a Role Value in a Message or User"
+        except ex:
+            print ex
+            return "Unidentified"
+        return None
 
 
     def getSaveableJson(self):
-        # TODO (0.8): save enabled
         stateDict = {"version":AUTHMATRIX_VERSION,
         "deletedUserCount":self.deletedUserCount,
         "deletedRoleCount":self.deletedRoleCount,
@@ -1568,6 +1673,7 @@ class MatrixDB():
                     "name":userEntry._name if not deleted else None,
                     "roles":userEntry._roles if not deleted else {},
                     "deleted":deleted,
+                    "enabled":userEntry._enabled,
                     "tableRow":userEntry._tableRow if not deleted else None,
                     "cookiesBase64":base64.b64encode(userEntry._cookies) if userEntry._cookies and not deleted else "",
                     "headersBase64":[base64.b64encode(x) if x else "" for x in userEntry._headers] if not deleted else [],
@@ -1588,6 +1694,7 @@ class MatrixDB():
                     "roles":messageEntry._roles if not deleted else {}, 
                     "regexBase64":base64.b64encode(messageEntry._regex) if messageEntry._regex and not deleted else "", 
                     "deleted":deleted,
+                    "enabled":messageEntry._enabled,
                     "failureRegexMode":messageEntry._failureRegexMode if not deleted else None,
                     "runBase64ForUserID":{int(x): {
                         "request": None if not messageEntry._userRuns[x] or not messageEntry._userRuns[x].getRequest() else base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getRequest())),
@@ -1606,6 +1713,7 @@ class MatrixDB():
                     "toID":chainEntry._toID if not deleted else None,
                     "toRegexBase64":base64.b64encode(chainEntry._toRegex) if chainEntry._toRegex and not deleted else "",
                     "deleted":deleted,
+                    "enabled":chainEntry._enabled,
                     "tableRow":chainEntry._tableRow if not deleted else None,
                     "name":chainEntry._name if not deleted else None,
                     "sourceUser":chainEntry._sourceUser if not deleted else None,
