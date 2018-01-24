@@ -298,6 +298,27 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
 
+        class actionChangeRegexes(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._messageTable.getSelectedRows():
+                        messages = [selfExtender._db.getMessageByRow(selfExtender._selectedRow)]
+                    else:
+                        messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
+
+                    newRegex,failureRegex = selfExtender.changeRegexPopup()
+                    if newRegex:
+                        for message in messages:
+                            message._regex = newRegex
+                            message.setFailureRegex(failureRegex)
+                        # Add to list of regexes if its not already there
+                        if newRegex not in selfExtender._db.arrayOfRegexes:
+                            selfExtender._db.arrayOfRegexes.append(newRegex)
+
+                    selfExtender._selectedColumn = -1
+                    selfExtender._messageTable.redrawTable()
+
+
         class actionChangeDomain(ActionListener):
             def replaceDomain(self, requestResponse, newDomain):
                 requestInfo = selfExtender._helpers.analyzeRequest(requestResponse)
@@ -313,6 +334,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     else:
                         messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
 
+                    # TODO (0.8): autofill if they are all the same: len(set())==1
                     service = None if len(messages)>1 else messages[0]._requestResponse.getHttpService()
 
                     ok, host, port, tls, replaceHost = selfExtender.changeDomainPopup(service)
@@ -333,21 +355,24 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # Message Table popups
         messagePopup = JPopupMenu()
         addPopup(self._messageTable,messagePopup)
-        messageRun = JMenuItem("Run Request(s)")
-        messageRun.addActionListener(actionRunMessage())
-        messagePopup.add(messageRun)
         toggleEnabled = JMenuItem("Disable/Enable Request(s)")
         toggleEnabled.addActionListener(actionToggleEnableMessage())
         messagePopup.add(toggleEnabled)
-        messageRemove = JMenuItem("Remove Request(s)")
-        messageRemove.addActionListener(actionRemoveMessage())
-        messagePopup.add(messageRemove)
+        messageRun = JMenuItem("Run Request(s)")
+        messageRun.addActionListener(actionRunMessage())
+        messagePopup.add(messageRun)
         toggleRegex = JMenuItem("Toggle Regex Mode (Success/Failure)")
         toggleRegex.addActionListener(actionToggleRegex())
         messagePopup.add(toggleRegex)
+        changeRegex = JMenuItem("Change Regexes")
+        changeRegex.addActionListener(actionChangeRegexes())
+        messagePopup.add(changeRegex)
         changeDomain = JMenuItem("Change Target Domain")
         changeDomain.addActionListener(actionChangeDomain())
         messagePopup.add(changeDomain)
+        messageRemove = JMenuItem("Remove Request(s)")
+        messageRemove.addActionListener(actionRemoveMessage())
+        messagePopup.add(messageRemove)
         
 
 
@@ -719,6 +744,40 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         t = Thread(target=self.runMessagesThread)
         self._tabs.removeAll()
         t.start()
+
+    def changeRegexPopup(self):
+        regexComboBox = JComboBox(self._db.arrayOfRegexes)
+        regexComboBox.setEditable(True)
+        failureModeCheckbox = JCheckBox()
+
+        panel = JPanel(GridBagLayout())
+        gbc = GridBagConstraints()
+        gbc.anchor = GridBagConstraints.WEST
+        firstline = JPanel()
+        firstline.add(JLabel("Select a Regex for all selected Requests:"))
+        secondline = JPanel()
+        secondline.add(regexComboBox)
+        thirdline = JPanel()
+        thirdline.add(failureModeCheckbox)
+        thirdline.add(JLabel("Regex Detects Unauthorized Requests (Failure Mode)"))
+
+
+        gbc.gridy = 0
+        panel.add(firstline,gbc)
+        gbc.gridy = 1
+        panel.add(secondline, gbc)
+        gbc.gridy = 2
+        panel.add(thirdline, gbc)
+
+
+        result = JOptionPane.showConfirmDialog(self._splitpane, panel, "Select Response Regex", JOptionPane.OK_CANCEL_OPTION)
+        value = regexComboBox.getSelectedItem() 
+        if result == JOptionPane.CANCEL_OPTION or not value:
+            return None, None
+        return value, failureModeCheckbox.isSelected()
+
+
+
 
     def changeDomainPopup(self, service):
         hostField = JTextField(25)
