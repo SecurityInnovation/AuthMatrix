@@ -73,7 +73,8 @@ from threading import Lock
 from threading import Thread
 import traceback
 import re
-import urllib2
+import urllib
+import hashlib
 import json
 import base64
 import random
@@ -981,7 +982,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 newBody = reqBody
     
                 # Replace with Chain
-                for toRegex, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
+                for toRegex, toValue, chainIndex in userEntry.getChainResultByMessageIndex(messageIndex):
+                    # Add transformers
+                    chain = self._db.arrayOfChains[chainIndex]
+                    toValue = chain.transform(toValue, self._callbacks)       
                     newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
                     newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
     
@@ -996,6 +1000,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         # Check that sourceUser is active
                         if sourceUser in self._db.getActiveUserIndexes():
                             toValue = self._db.getSVByName(svName).getValueForUserIndex(sourceUser)
+                            # Add transformers
+                            toValue = chain.transform(toValue, self._callbacks)
                             toRegex = chain._toRegex
                             newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
                             newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
@@ -1054,7 +1060,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                                     
                                 for toID in chain.getToIDRange():
                                     for affectedUser in affectedUsers:
-                                        affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
+                                        affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result, chain._index)
                 index +=1
 
         # Grab all active roleIndexes that are checkboxed
@@ -1243,9 +1249,9 @@ class MatrixDB():
         # NOTE: consider moving these constants to a different class
         self.STATIC_USER_TABLE_COLUMN_COUNT = 2
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
-        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 6
+        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
         self.LOAD_TIMEOUT = 10.0
-        self.BURP_ORANGE = Color(0xff6633)# TODO (8.0): Update to be correct
+        self.BURP_ORANGE = Color(0xff6633)
 
         self.lock = Lock()
         self.arrayOfMessages = ArrayList()
@@ -1506,6 +1512,9 @@ class MatrixDB():
 
         self.lock.acquire()
 
+        # TODO (0.8): If the state file is missing an array, maybe it is just supposed to update the other arrays
+        # Consider not clearing the arrays that are missing from the state file
+
         self.arrayOfUsers = ArrayList()
         self.arrayOfRoles = ArrayList()
         self.arrayOfMessages = ArrayList()
@@ -1625,14 +1634,14 @@ class MatrixDB():
         self.lock.release()
 
         # Sanity checks
-        sanityResult = self.sanityCheck()
+        sanityResult = self.sanityCheck(extender)
         if sanityResult:
             print "Error parsing state file: "+sanityResult
             self.clear()
 
 
 
-    def sanityCheck(self):
+    def sanityCheck(self, extender):
         try:
             # Returns an error string if the DB is in a corrupt state, else returns None
             userIndexes = self.getActiveUserIndexes() 
@@ -1702,8 +1711,8 @@ class MatrixDB():
                         for roleIndex in roleIndexes:
                             if roleIndex not in roleKeys:
                                 return "Missing a Role Value in a Message or User"
-        except ex:
-            print ex
+        except:
+            traceback.print_exc(file=extender._callbacks.getStderr())
             return "Unidentified"
         return None
 
@@ -2351,6 +2360,8 @@ class ChainTableModel(AbstractTableModel):
             return "Regex - Replace into HTTP Request"
         elif columnIndex == 5:
             return "Use Values From:"
+        elif columnIndex == 6:
+            return "Transformers"
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
@@ -2386,6 +2397,11 @@ class ChainTableModel(AbstractTableModel):
                     return self.chainFromDefault
                 else:
                     return ""
+            elif columnIndex == 6:
+                ret = "x"
+                for transformer in chainEntry._transformers:
+                    ret = transformer+"("+ret+")"
+                return "" if ret == "x" else ret
         return ""
 
     def addRow(self, row):
@@ -2424,6 +2440,11 @@ class ChainTableModel(AbstractTableModel):
                     chainEntry._sourceUser = user._index
                 else:
                     chainEntry._sourceUser = -1
+            elif col == 6:
+                if val == "(clear)":
+                    chainEntry.clearTransformers()
+                else:
+                    chainEntry.addTransformer(val)
 
             self.fireTableCellUpdated(row,col)
 
@@ -2460,13 +2481,19 @@ class ChainTable(JTable):
 
             db = self.getModel()._db
 
-            # Chain From comboboxes
+            # Chain Use Value From comboboxes
             users = [self.getModel().chainFromDefault]+[userEntry._name for userEntry in db.getUsersInOrderByRow()]
             usersComboBox = JComboBox(users)
             usersComboBoxEditor = DefaultCellEditor(usersComboBox)
             self.getColumnModel().getColumn(5).setCellEditor(usersComboBoxEditor)
 
-            # FromID comboboxes
+            # Tranformers Combobox
+            transformers = ["(clear)"]+ChainEntry.TransformerList
+            transformerComboBox = JComboBox(transformers)
+            transformerComboBoxEditor = DefaultCellEditor(transformerComboBox)
+            self.getColumnModel().getColumn(6).setCellEditor(transformerComboBoxEditor)
+
+            # Source ID comboboxes
             sources = [sv._name for sv in db.arrayOfSVs] + [self.getModel().requestPrefix+str(x) for x in db.getActiveMessageIndexes()]
             sourcesComboBox = JComboBox(sources)
             sourcesComboBoxEditor = DefaultCellEditor(sourcesComboBox)
@@ -2531,7 +2558,9 @@ class ChainTable(JTable):
             self.getColumnModel().getColumn(3).setMaxWidth(320);        
             self.getColumnModel().getColumn(4).setMinWidth(180);
             self.getColumnModel().getColumn(5).setMinWidth(150);
-            self.getColumnModel().getColumn(5).setMaxWidth(270);        
+            self.getColumnModel().getColumn(5).setMaxWidth(270); 
+            self.getColumnModel().getColumn(6).setMinWidth(100);
+
 
 
 # For color-coding checkboxes in the message table
@@ -2760,7 +2789,7 @@ class UserEntry:
         self._deleted = deleted
         self._tableRow = tableRow
         self._cookies = cookies
-        self._headers = headers
+        self._headers = headers # TODO (0.8): Should this use [:] to copy safely?
         self._chainResults = {}
         self._enabled = enabled
         return
@@ -2769,11 +2798,12 @@ class UserEntry:
     def addRoleByIndex(self, roleIndex, enabled=False):
         self._roles[roleIndex] = enabled
 
-    def addChainResultByMessageIndex(self, toID, toRegex, toValue):
+    def addChainResultByMessageIndex(self, toID, toRegex, toValue, chainIndex):
+        # TODO (0.8): Don't need to save toRegex here with chainID
         if not toID in self._chainResults:
-            self._chainResults[toID] = [(toRegex, toValue)]
+            self._chainResults[toID] = [(toRegex, toValue, chainIndex)]
         else:
-            self._chainResults[toID].append((toRegex, toValue))
+            self._chainResults[toID].append((toRegex, toValue, chainIndex))
 
     def getChainResultByMessageIndex(self, toID):
         if toID in self._chainResults:
@@ -2831,7 +2861,9 @@ class RoleEntry:
 
 class ChainEntry:
 
-    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser=-1, enabled=True):
+    TransformerList = ["base64","url","hex","sha1","sha256","sha512","md5"]
+    
+    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser=-1, enabled=True, transformers=[]):
         self._index = index
         self._fromID = fromID
         self._fromRegex = fromRegex
@@ -2846,6 +2878,8 @@ class ChainEntry:
         self._toStart = ""
         self._toEnd = ""
         self._enabled = enabled
+        self._transformers = transformers[:] # TODO (0.8): save and load
+
         return
 
     def setDeleted(self):
@@ -2921,6 +2955,37 @@ class ChainEntry:
 
     def toggleEnabled(self):
         self._enabled = not self._enabled
+
+    def addTransformer(self, value):
+        self._transformers.append(value)
+
+    def clearTransformers(self):
+        self._transformers=[]
+
+    def transform(self, value, callbacks):
+        ret = value
+        try:
+            for transformer in self._transformers:
+                #self._transformerList = ["base64encode","urlencode","hexencode","sha1","sha256","sha512","md5"]
+                if transformer == self.TransformerList[0]:
+                    ret = base64.b64encode(ret)
+                elif transformer == self.TransformerList[1]:
+                    ret = urllib.quote_plus(ret)
+                elif transformer == self.TransformerList[2]:
+                    ret = base64.b16encode(ret)
+                elif transformer == self.TransformerList[3]:
+                    ret = hashlib.sha1(ret).hexdigest()
+                elif transformer == self.TransformerList[4]:
+                    ret = hashlib.sha256(ret).hexdigest()
+                elif transformer == self.TransformerList[5]:
+                    ret = hashlib.sha512(ret).hexdigest()
+                elif transformer == self.TransformerList[6]:
+                    ret = hashlib.md5(ret).hexdigest()
+        except:
+            traceback.print_exc(file=callbacks.getStderr())
+            return value
+        return ret
+
 
 
 class SVEntry:
