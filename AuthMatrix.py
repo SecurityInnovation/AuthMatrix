@@ -982,10 +982,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 newBody = reqBody
     
                 # Replace with Chain
-                for toRegex, toValue, chainIndex in userEntry.getChainResultByMessageIndex(messageIndex):
+                for toValue, chainIndex in userEntry.getChainResultByMessageIndex(messageIndex):
                     # Add transformers
                     chain = self._db.arrayOfChains[chainIndex]
                     toValue = chain.transform(toValue, self._callbacks)       
+                    toRegex = chain._toRegex
                     newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
                     newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
     
@@ -1060,7 +1061,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                                     
                                 for toID in chain.getToIDRange():
                                     for affectedUser in affectedUsers:
-                                        affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result, chain._index)
+                                        affectedUser.addChainResultByMessageIndex(toID, result, chain._index)
                 index +=1
 
         # Grab all active roleIndexes that are checkboxed
@@ -1628,7 +1629,8 @@ class MatrixDB():
                 toRegex = "" if "toRegexBase64" not in chainEntry else base64.b64decode(chainEntry["toRegexBase64"]),
                 deleted = deleted,
                 sourceUser = -1 if "sourceUser" not in chainEntry else chainEntry["sourceUser"],
-                enabled = True if "enabled" not in chainEntry else chainEntry["enabled"]
+                enabled = True if "enabled" not in chainEntry else chainEntry["enabled"],
+                transformers = [] if "transformers" not in chainEntry else chainEntry["transformers"]
                 ))
         
         self.lock.release()
@@ -1787,7 +1789,8 @@ class MatrixDB():
                     "fromStart":chainEntry._fromStart if not deleted else None,
                     "fromEnd":chainEntry._fromEnd if not deleted else None,
                     "toStart":chainEntry._toStart if not deleted else None,
-                    "toEnd":chainEntry._toEnd if not deleted else None
+                    "toEnd":chainEntry._toEnd if not deleted else None,
+                    "transformers":chainEntry._transformers if not deleted else []
                 })
 
         stateDict["arrayOfSVs"] = []
@@ -2798,12 +2801,11 @@ class UserEntry:
     def addRoleByIndex(self, roleIndex, enabled=False):
         self._roles[roleIndex] = enabled
 
-    def addChainResultByMessageIndex(self, toID, toRegex, toValue, chainIndex):
-        # TODO (0.8): Don't need to save toRegex here with chainID
+    def addChainResultByMessageIndex(self, toID, toValue, chainIndex):
         if not toID in self._chainResults:
-            self._chainResults[toID] = [(toRegex, toValue, chainIndex)]
+            self._chainResults[toID] = [(toValue, chainIndex)]
         else:
-            self._chainResults[toID].append((toRegex, toValue, chainIndex))
+            self._chainResults[toID].append((toValue, chainIndex))
 
     def getChainResultByMessageIndex(self, toID):
         if toID in self._chainResults:
@@ -2878,7 +2880,7 @@ class ChainEntry:
         self._toStart = ""
         self._toEnd = ""
         self._enabled = enabled
-        self._transformers = transformers[:] # TODO (0.8): save and load
+        self._transformers = transformers[:] 
 
         return
 
@@ -2964,6 +2966,8 @@ class ChainEntry:
 
     def transform(self, value, callbacks):
         ret = value
+        if not ret:
+            return ""
         try:
             for transformer in self._transformers:
                 #self._transformerList = ["base64encode","urlencode","hexencode","sha1","sha256","sha512","md5"]
