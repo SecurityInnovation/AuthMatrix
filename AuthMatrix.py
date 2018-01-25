@@ -334,9 +334,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         messages = [selfExtender._db.getMessageByRow(selfExtender._selectedRow)]
                     else:
                         messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
-
-                    # TODO (0.8): autofill if they are all the same: len(set())==1
-                    service = None if len(messages)>1 else messages[0]._requestResponse.getHttpService()
+                    
+                    # Autofill the service values if they are all the same
+                    uniqueServices = [(message._requestResponse.getHttpService().getHost(),
+                        message._requestResponse.getHttpService().getPort(),
+                        message._requestResponse.getHttpService().getProtocol()) for message in messages]
+                    service = None if len(set(uniqueServices)) != 1 else messages[0]._requestResponse.getHttpService()
 
                     ok, host, port, tls, replaceHost = selfExtender.changeDomainPopup(service)
                     if ok and host:
@@ -908,7 +911,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 # Only run if message is in the selected indexes (NOTE: dependencies will be run even if not selected)
                 if message._index in indexes:
                     messagesThatHaveRun = self.runMessageAndDependencies(message._index, messagesThatHaveRun, [])
-                    #self.runMessage(message._index)
 
         except:
             traceback.print_exc(file=self._callbacks.getStderr())
