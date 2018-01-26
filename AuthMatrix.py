@@ -81,7 +81,7 @@ import random
 import string
 
 
-AUTHMATRIX_VERSION = "0.7.1"
+AUTHMATRIX_VERSION = "0.8"
 
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
@@ -1048,7 +1048,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             # Else, replace each user's chain results individually
                             replace = True
                             affectedUsers = [userEntry]
-                            if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0: # TODO (0.8): why .isdigit()? Can this line just be removed
+                            if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0: # TODO (0.9): why .isdigit()? Can this line just be removed
                                 if str(chain._sourceUser) == str(userIndex):
                                     affectedUsers = self._db.getUsersInOrderByRow()
                                 else:
@@ -1514,152 +1514,163 @@ class MatrixDB():
             print "Invalid Version in State File ("+version+")"
             return
 
+        backupState = self.getSaveableJson()
+
         self.lock.acquire()
 
-        # NOTE: As of 0.8, If the state file is missing an element, then it assumes it is 
-        # the intention of the user to not modify that array, so that just small bits can be updated.
+        try:
+    
+            # NOTE: As of 0.8, If the state file is missing an element, then it assumes it is 
+            # the intention of the user to not modify that array, so that just small bits can be updated.
+            
+            # NOTE: As of 0.8 the deleted counts and header counts are filled in using the values found in each array
+    
+            # TODO (0.8): every field that has {int(x is using an ID in the state that is not obvious to the user
+    
+            if "arrayOfRoles" in stateDict:
+                self.arrayOfRoles = ArrayList()
+                self.deletedRoleCount = 0
+    
+                # (self,index,columnIndex,name,deleted=False,singleUser=False):
+                for roleEntry in stateDict["arrayOfRoles"]:
+                    deleted = False if "deleted" not in roleEntry else roleEntry["deleted"]
+                    if deleted:
+                        self.deletedRoleCount += 1
         
-        # NOTE: As of 0.8 the deleted counts and header counts are filled in using the values found in each array
-
-        # TODO (0.8): maybe this is set inside the arrayOfUsers?
-        if version >= "0.7":
-            # Update SVs (Note: sanity check will catch it if they do not match to active users)
-            if "arrayOfSVs" in stateDict:
-                self.arrayOfSVs = ArrayList()
-                for svEntry in stateDict["arrayOfSVs"]:
-                    self.arrayOfSVs.add(SVEntry(
-                        svEntry["name"],
-                        {int(x): svEntry["userValues"][x] for x in svEntry["userValues"].keys()}, # convert keys to ints
+                    self.arrayOfRoles.add(RoleEntry(
+                        roleEntry["index"],
+                        roleEntry["column"],
+                        roleEntry["name"],
+                        deleted = deleted,
+                        singleUser = False if version < "0.7" or "singleUser" not in roleEntry else roleEntry["singleUser"]
                         ))
-        else:
-            self.arrayOfSVs = ArrayList()
-
-
-        if "arrayOfRoles" in stateDict:
-            self.arrayOfRoles = ArrayList()
-            self.deletedRoleCount = 0
-
-            # (self,index,columnIndex,name,deleted=False,singleUser=False):
-            for roleEntry in stateDict["arrayOfRoles"]:
-                deleted = False if "deleted" not in roleEntry else roleEntry["deleted"]
-                if deleted:
-                    self.deletedRoleCount += 1
     
-                self.arrayOfRoles.add(RoleEntry(
-                    roleEntry["index"],
-                    roleEntry["column"],
-                    roleEntry["name"],
-                    deleted = deleted,
-                    singleUser = False if version < "0.7" or "singleUser" not in roleEntry else roleEntry["singleUser"]
-                    ))
-
-        if "arrayOfUsers" in stateDict:
-            self.arrayOfUsers = ArrayList()
-            self.deletedUserCount = 0
-            self.headerCount = 0
-
-            # NOTE: leaving out chainResults
-            # (self, index, tableRow, name, roles = {}, deleted=False, cookies="", headers = [], enabled = True):
-            for userEntry in stateDict["arrayOfUsers"]:
-                deleted = False if "deleted" not in userEntry else userEntry["deleted"]
-                if deleted:
-                    self.deletedUserCount += 1
-
-
-
-                # Suppport old and new header versions
-                if "headersBase64" in userEntry:
-                    headers = [base64.b64decode(x) for x in userEntry["headersBase64"]]
-                    # Grab the number of headers. Sanity check will later confirm that each user has the right number of headers
-                    if self.headerCount == 0:
-                        self.headerCount = len(headers)
-                elif "headerBase64" in userEntry:
-                    self.headerCount = 1
-                    headers = [base64.b64decode(userEntry["headerBase64"])]
-                else:     
-                    headers = [""]*self.headerCount
+            if "arrayOfUsers" in stateDict:
+                self.arrayOfUsers = ArrayList()
+                self.deletedUserCount = 0
+                self.headerCount = 0
+                self.arrayOfSVs = ArrayList()
+    
+                # NOTE: leaving out chainResults
+                # (self, index, tableRow, name, roles = {}, deleted=False, cookies="", headers = [], enabled = True):
+                for userEntry in stateDict["arrayOfUsers"]:
+                    deleted = False if "deleted" not in userEntry else userEntry["deleted"]
+                    if deleted:
+                        self.deletedUserCount += 1
     
     
-                self.arrayOfUsers.add(UserEntry(
-                    userEntry["index"],
-                    userEntry["tableRow"],
-                    userEntry["name"],
-                    {int(x): userEntry["roles"][x] for x in userEntry["roles"].keys()}, # convert keys to ints
-                    deleted = deleted,
-                    cookies = "" if "cookiesBase64" not in userEntry else base64.b64decode(userEntry["cookiesBase64"]),
-                    headers = headers,
-                    enabled = True if "enabled" not in userEntry else userEntry["enabled"]
-                    ))
-
-        if "arrayOfMessages" in stateDict:
-            self.arrayOfMessages = ArrayList()
-            self.deletedMessageCount = 0
-            self.arrayOfRegexes = []
-
-            # NOTE leaving out roleResults and userRuns (need to convert keys)
-            # (self, index, tableRow, requestResponse, name = "", roles = {}, regex = "", deleted = False, failureRegexMode = False, enabled = True):
-            for messageEntry in stateDict["arrayOfMessages"]:
-                deleted = False if "deleted" not in messageEntry else messageEntry["deleted"]
-                if deleted:
-                    self.deletedMessageCount += 1
     
-                regex = "" if "regexBase64" not in messageEntry else base64.b64decode(messageEntry["regexBase64"])
-    
-                if regex and regex not in self.arrayOfRegexes:
-                    self.arrayOfRegexes.append(regex)
-    
-                requestResponse = None if deleted else RequestResponseStored(
-                        extender,
-                        messageEntry["host"],
-                        messageEntry["port"],
-                        messageEntry["protocol"],
-                        StringUtil.toBytes(base64.b64decode(messageEntry["requestBase64"])))
-    
-                self.arrayOfMessages.add(MessageEntry(
-                    messageEntry["index"],
-                    messageEntry["tableRow"],
-                    requestResponse,
-                    messageEntry["name"], 
-                    {int(x): messageEntry["roles"][x] for x in messageEntry["roles"].keys()}, # convert keys to ints
-                    regex = regex, 
-                    deleted = deleted, 
-                    failureRegexMode = False if "failureRegexMode" not in messageEntry else messageEntry["failureRegexMode"],
-                    enabled = True if "enabled" not in messageEntry else messageEntry["enabled"]
-                    ))
-
-
-        if "arrayOfChains" in stateDict:
-            self.arrayOfChains = ArrayList()
-            self.deletedChainCount = 0
-
-            # NOTE: leaving out fromStart, fromEnd, toStart, toEnd
-            for chainEntry in stateDict["arrayOfChains"]:
-                deleted = False if "deleted" not in chainEntry else chainEntry["deleted"]
-                if deleted:
-                    self.deletedChainCount += 1
-    
-                self.arrayOfChains.add(ChainEntry(
-                    chainEntry["index"],
-                    chainEntry["tableRow"],
-                    name = "" if "name" not in chainEntry else chainEntry["name"],
-                    fromID = "" if "fromID" not in chainEntry else chainEntry["fromID"],
-                    fromRegex = "" if "fromRegexBase64" not in chainEntry else base64.b64decode(chainEntry["fromRegexBase64"]),
-                    toID = "" if "toID" not in chainEntry else chainEntry["toID"],
-                    toRegex = "" if "toRegexBase64" not in chainEntry else base64.b64decode(chainEntry["toRegexBase64"]),
-                    deleted = deleted,
-                    sourceUser = -1 if "sourceUser" not in chainEntry else chainEntry["sourceUser"],
-                    enabled = True if "enabled" not in chainEntry else chainEntry["enabled"],
-                    transformers = [] if "transformers" not in chainEntry else chainEntry["transformers"]
-                    ))
+                    # Suppport old and new header versions
+                    if "headersBase64" in userEntry:
+                        headers = [base64.b64decode(x) for x in userEntry["headersBase64"]]
+                        # Grab the number of headers. Sanity check will later confirm that each user has the right number of headers
+                        if self.headerCount == 0:
+                            self.headerCount = len(headers)
+                    elif "headerBase64" in userEntry:
+                        self.headerCount = 1
+                        headers = [base64.b64decode(userEntry["headerBase64"])]
+                    else:     
+                        headers = [""]*self.headerCount
         
+                    
+                    self.arrayOfUsers.add(UserEntry(
+                        userEntry["index"],
+                        userEntry["tableRow"],
+                        userEntry["name"],
+                        {int(x): userEntry["roles"][x] for x in userEntry["roles"].keys()}, # convert keys to ints
+                        deleted = deleted,
+                        cookies = "" if "cookiesBase64" not in userEntry else base64.b64decode(userEntry["cookiesBase64"]),
+                        headers = headers,
+                        enabled = True if "enabled" not in userEntry else userEntry["enabled"]
+                        ))
+    
+                # Update Static Values
+                keyword = "arrayOfChainSources" if version >= "0.8" else "arrayOfSVs"
+                if keyword in stateDict:
+                    for svEntry in stateDict[keyword]:
+                        # If the index does not match an active users, do not include it
+                        self.arrayOfSVs.add(SVEntry(
+                            svEntry["name"],
+                            {int(x): svEntry["userValues"][x] for x in svEntry["userValues"].keys() if int(x) in self.getActiveUserIndexes()}, # convert keys to ints
+                            ))
+    
+    
+            if "arrayOfMessages" in stateDict:
+                self.arrayOfMessages = ArrayList()
+                self.deletedMessageCount = 0
+                self.arrayOfRegexes = []
+    
+                # NOTE leaving out roleResults and userRuns (need to convert keys)
+                # (self, index, tableRow, requestResponse, name = "", roles = {}, regex = "", deleted = False, failureRegexMode = False, enabled = True):
+                for messageEntry in stateDict["arrayOfMessages"]:
+                    deleted = False if "deleted" not in messageEntry else messageEntry["deleted"]
+                    if deleted:
+                        self.deletedMessageCount += 1
+        
+                    regex = "" if "regexBase64" not in messageEntry else base64.b64decode(messageEntry["regexBase64"])
+        
+                    if regex and regex not in self.arrayOfRegexes:
+                        self.arrayOfRegexes.append(regex)
+        
+                    requestResponse = None if deleted else RequestResponseStored(
+                            extender,
+                            messageEntry["host"],
+                            messageEntry["port"],
+                            messageEntry["protocol"],
+                            StringUtil.toBytes(base64.b64decode(messageEntry["requestBase64"])))
+        
+                    self.arrayOfMessages.add(MessageEntry(
+                        messageEntry["index"],
+                        messageEntry["tableRow"],
+                        requestResponse,
+                        messageEntry["name"], 
+                        {int(x): messageEntry["roles"][x] for x in messageEntry["roles"].keys()}, # convert keys to ints
+                        regex = regex, 
+                        deleted = deleted, 
+                        failureRegexMode = False if "failureRegexMode" not in messageEntry else messageEntry["failureRegexMode"],
+                        enabled = True if "enabled" not in messageEntry else messageEntry["enabled"]
+                        ))
+    
+    
+            if "arrayOfChains" in stateDict:
+                self.arrayOfChains = ArrayList()
+                self.deletedChainCount = 0
+    
+                # NOTE: leaving out fromStart, fromEnd, toStart, toEnd
+                for chainEntry in stateDict["arrayOfChains"]:
+                    deleted = False if "deleted" not in chainEntry else chainEntry["deleted"]
+                    if deleted:
+                        self.deletedChainCount += 1
+        
+                    self.arrayOfChains.add(ChainEntry(
+                        chainEntry["index"],
+                        chainEntry["tableRow"],
+                        name = "" if "name" not in chainEntry else chainEntry["name"],
+                        fromID = "" if "fromID" not in chainEntry else chainEntry["fromID"],
+                        fromRegex = "" if "fromRegexBase64" not in chainEntry else base64.b64decode(chainEntry["fromRegexBase64"]),
+                        toID = "" if "toID" not in chainEntry else chainEntry["toID"],
+                        toRegex = "" if "toRegexBase64" not in chainEntry else base64.b64decode(chainEntry["toRegexBase64"]),
+                        deleted = deleted,
+                        sourceUser = -1 if "sourceUser" not in chainEntry else chainEntry["sourceUser"],
+                        enabled = True if "enabled" not in chainEntry else chainEntry["enabled"],
+                        transformers = [] if "transformers" not in chainEntry else chainEntry["transformers"]
+                        ))
+        
+        except:
+            self.lock.release()
+            print "Corrupt State File: Reverting back to original. (See stderr for more detail)"
+            traceback.print_exc(file=extender._callbacks.getStderr())
+            self.loadJson(backupState,extender)
+            return
+
         self.lock.release()
 
         # Sanity checks
         sanityResult = self.sanityCheck(extender)
         if sanityResult:
             print "Error parsing state file: "+sanityResult
-            # TODO (0.8): save a copy earlier and replace it back to original
-            self.clear()
+            # Revert to the backup state
+            self.loadJson(backupState,extender)
 
 
 
@@ -1734,7 +1745,8 @@ class MatrixDB():
                             if roleIndex not in roleKeys:
                                 return "Missing a Role Value in a Message or User"
 
-            # TODO (0.8): Static Value check
+            # NOTE: Skipping Static Value check because a missing SV is handled gracefully
+
 
         except:
             traceback.print_exc(file=extender._callbacks.getStderr())
@@ -1815,9 +1827,9 @@ class MatrixDB():
                     "transformers":chainEntry._transformers if not deleted else []
                 })
 
-        stateDict["arrayOfSVs"] = []
+        stateDict["arrayOfChainSources"] = []
         for SVEntry in self.arrayOfSVs:
-            stateDict["arrayOfSVs"].append({
+            stateDict["arrayOfChainSources"].append({
                 "name":SVEntry._name,
                 "userValues":SVEntry._userValues
                 })
@@ -2217,7 +2229,7 @@ class MessageTableModel(AbstractTableModel):
                 # Add this value to the array
                 if val and val not in self._db.arrayOfRegexes:
                     self._db.arrayOfRegexes.append(val)
-                # TODO (0.8): Remove unused Regexes from that list
+                # TODO (0.9): Remove unused Regexes from that list
             else:
                 roleIndex = self._db.getRoleByColumn(col, 'm')._index
                 messageEntry.addRoleByIndex(roleIndex,val)
@@ -2722,7 +2734,7 @@ class UserEnabledRenderer(TableCellRenderer):
             cell.setBackground(table.getBackground())
         return cell
 
-# TODO (0.8): combine these classes
+# TODO (0.9): combine these classes
 # Default Renderer checking Chain Table for Enabled
 class ChainEnabledRenderer(TableCellRenderer):
     def __init__(self, defaultCellRender, db):
