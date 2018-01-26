@@ -2,13 +2,13 @@
 
 State files are saved as JSON strings. 
 
-This document will describe each field of these fields in hopes to provide sufficient information for users to automate the task of modifying state directly from the file if they so desire.
+This document describes each field of this file so that power users can automate tasks by modifying state files directly.
 
-Note that several fields are used internally and can safely be ignored when constructing state by hand.
+Note that several fields are only used internally and can safely be ignored when constructing state by hand.
 
 Additionally, several fields are base64 encoded.  This is done to simplify the process of parsing JSON (such as removing comments)
 
-Several fields reference identifiers of other elements (i.e. Users reference roles by index). For these cases, it may not be possible to locate the index from the UI.  It is important to use an existing state to determine what elements map to which indices.
+Several fields reference identifiers of other elements (i.e. Users reference Roles by their index). For these cases, it may not be possible to locate the index from the UI.  It may be necessary to parse an existing state to determine what existing elements map to which identifiers.
 
 ## JSON Format
 
