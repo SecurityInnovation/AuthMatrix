@@ -14,7 +14,7 @@ STATE FILE COMPATIBILITY - v0.5.2 and greater
 
 * AuthMatrix now checks for chains with message dependencies and will now run requests in the correct order to satisfy those dependencies.
 
-* State File loading has been simplified to be more permissive of missing elements.  Additionally, users can now load "partial states" containing only certain table data in order to update just those tables.
+* State File loading has been simplified to be more permissive of missing elements.  Additionally, users can now load "partial states" containing only certain table data in order to update just those tables. More information describing the expected JSON structure linked in the README.
 
 * Success Regexes are now a dropdown box containing all previous regexes for fast switching
 

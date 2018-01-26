@@ -1532,7 +1532,7 @@ class MatrixDB():
             
             # NOTE: As of 0.8 the deleted counts and header counts are filled in using the values found in each array
     
-            # TODO (0.8): every field that has {int(x is using an ID in the state that is not obvious to the user
+            # TODO (0.9): every field that has "{int(x" is using an ID in the state that is not obvious to the user
     
             if "arrayOfRoles" in stateDict:
                 self.arrayOfRoles = ArrayList()
@@ -1754,7 +1754,7 @@ class MatrixDB():
 
             # NOTE: Skipping Static Value check because a missing SV is handled gracefully
 
-            # TODO (0.8): check fromID and sourceUser in Chain
+            # TODO (0.9): check fromID and sourceUser in Chain
 
         except:
             traceback.print_exc(file=extender._callbacks.getStderr())
@@ -2201,7 +2201,7 @@ class MessageTableModel(AbstractTableModel):
             roleEntry = self._db.getRoleByColumn(columnIndex, 'm')
             if roleEntry:
                 return roleEntry._name
-                # TODO (0.8): Maybe show the index here to help with constructing state files?
+                # TODO (0.9): Maybe show the index here to help with constructing state files?
                 #return roleEntry._name+" (#"+str(roleEntry._index)+")"
         return ""
 
