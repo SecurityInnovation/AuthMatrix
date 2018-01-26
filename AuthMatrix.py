@@ -1506,7 +1506,15 @@ class MatrixDB():
         # This replacement might have weird results, but most are mitigated by using base64 encoding
         jsonFixed = jsonText.replace(": False",": false").replace(": True",": true")
 
-        stateDict = json.loads(jsonFixed)
+        # Get Rid of comments
+        jsonFixed = re.sub(r"[/][*]([^*]|([*][^/]))*[*][/]", "", jsonFixed, 0, re.MULTILINE)
+
+        try:
+            stateDict = json.loads(jsonFixed)
+        except:
+            print jsonFixed
+            traceback.print_exc(file=extender._callbacks.getStderr())
+            return
 
         version = stateDict["version"]
         if version > AUTHMATRIX_VERSION:
@@ -1746,6 +1754,7 @@ class MatrixDB():
 
             # NOTE: Skipping Static Value check because a missing SV is handled gracefully
 
+            # TODO (0.8): check fromID and sourceUser in Chain
 
         except:
             traceback.print_exc(file=extender._callbacks.getStderr())

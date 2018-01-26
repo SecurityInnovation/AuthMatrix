@@ -117,4 +117,5 @@ __NOTE:__ False positive detection and highlighting may not work in Failure Rege
 
 ## JSON State File
 
-TODO
+[Refer to the JsonState document for details regarding the structure of state files](JsonState.md)
+
