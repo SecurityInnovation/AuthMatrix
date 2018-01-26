@@ -522,7 +522,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             currentPane = currentPane.getParent()
         if currentPane:
             index = currentPane.indexOfComponent(previousPane)
-            # TODO user old background instead of black
+            # TODO use old background instead of black (currently doesnt work)
             #oldBackground = currentPane.getBackgroundAt(index)
             currentPane.setBackgroundAt(index,self._db.BURP_ORANGE)
 
@@ -681,7 +681,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if result != JOptionPane.YES_OPTION:
                     return
             fileName = f.getPath()
-            # TODO Bug here.  Check if the value being written is 0 before opening
+            # TODO Potential bug here.  Check if the value being written is 0 before opening
             # TODO add a try catch here?
             jsonValue = self._db.getSaveableJson()
             if jsonValue:
@@ -689,7 +689,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 fileout.write(jsonValue)
                 fileout.close()
             else:
-                # TODO pop up error
+                # TODO popup errors instead of prints
                 print "Error: Save Failed. JSON empty."
             # TODO currently this will save the config to burp, but not to a specific project
             # Will also need an export and loadFromFile feature if this is ever implemented
@@ -948,7 +948,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
     def runMessage(self, messageIndex):
 
-        # TODO: this uses hacky threading tricks for handling timeouts, find a better way
+        # NOTE: this uses hacky threading tricks for handling timeouts
         tempRequestResponse = []
         index = 0
         def loadRequestResponse(index, service, message):
@@ -1203,7 +1203,6 @@ class ModifyMessage():
     @staticmethod
     def chainReplace(toRegex, toValue, toArray):
         # TODO clean up so that the input is headers+body and its called only once
-        # TODO support encoding, including URL encode
         isBody = len(toArray)==1
         if toRegex:
             # BUG FIX: Geoff reported that if the regex ends at the newline on the last header,
@@ -2828,7 +2827,7 @@ class UserEntry:
         self._deleted = deleted
         self._tableRow = tableRow
         self._cookies = cookies
-        self._headers = headers # TODO (0.8): Should this use [:] to copy safely?
+        self._headers = headers[:]
         self._chainResults = {}
         self._enabled = enabled
         return
