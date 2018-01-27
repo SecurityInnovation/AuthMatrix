@@ -1,3 +1,31 @@
+v0.8 - 11/26/2018
+
+STATE FILE COMPATIBILITY - v0.5.2 and greater
+
+* Major release containing several updates.
+
+* AuthMatrix Tab will now highlight when a request is sent to it from another tab.
+
+* Chains, Messages, and Users can now all be disabled using a right click menu option.
+
+* Color scheme has been updated to reflect Burp's new palette.
+
+* Users can now be Reordered via drag-and-drop.  This affects which order the requests are run. (Useful for DELETE requests)
+
+* AuthMatrix now checks for chains with message dependencies and will now run requests in the correct order to satisfy those dependencies.
+
+* State File loading has been simplified to be more permissive of missing elements.  Additionally, users can now load "partial states" containing only certain table data in order to update just those tables. More information describing the expected JSON structure linked in the README.
+
+* Success Regexes are now a dropdown box containing all previous regexes for fast switching
+
+* New right click menu when selecting multiple requests that allows for updating Success Regexes for all at once.
+
+* Chain Transformers: new column in chains allowing encoding of input date before it is used in a request.  Current encodings supported include base64, url, hex, and several hashing functions.
+
+* Various UI updates
+
+* Bug Fixes
+
 v0.7.1 - 11/21/2017
 
 STATE FILE COMPATIBILITY - v0.5.2 and greater

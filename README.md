@@ -1,4 +1,4 @@
-# AuthMatrix v0.7.1
+# AuthMatrix v0.8
 
 AuthMatrix is an extension to Burp Suite that provides a simple way to test authorization in web applications and web services. With AuthMatrix, testers focus on thoroughly defining tables of users, roles, and requests for their specific target application upfront. These tables are structured in a similar format to that of an access control matrix common in various threat modeling methodologies.
 
@@ -22,11 +22,13 @@ Be sure to use Jython version 2.7.0 or greater to ensure compatibility.
 
 1. Create roles for all privilege levels within the target application.  (Common roles may include User, Admin, and Anonymous)
 
-2. Create enough users to fit these various roles and select the checkboxes for all roles that the user belongs to. "Single-User" roles containing just the one user will be configured automatically to assist in cross-user resource testing.
+2. Create enough users to fit these various roles and select the checkboxes for all roles that the user belongs to. "Single-User" roles containing just the one user will be configured automatically to assist in cross-user resource testing. If these are not needed, feel free to delete these roles by right-clicking the column in the Request Table.
 
 3. Generate session tokens for each user from the Repeater tab and enter them into the relevant column within the Users Table. Cookies can be sent directly to the users via the right click menu available in Repeater. AuthMatrix will intelligently parse the cookie string from the table and substitute/add them to the requests where applicable.
 
-    * NOTE: The Cookies field is optional. If the target uses HTTP headers instead, these can be added by clicking the "New Header" button.
+    * NOTE: The Cookies field is optional. If the target uses HTTP headers instead, these can be added by clicking the "New Header" button. 
+
+    * For more advanced configurations, including automated refreshing of credentials, see the "Chains for Authenticating Users" example below.
 
 4. From another area of Burp Suite (i.e. Target tab, Repeater Tab, etc) right click a request and select "Send to AuthMatrix." 
 
@@ -84,7 +86,7 @@ A Chain entry has the following values:
 
 * __Use Values From:__ specify whether to use the source value obtained from one selected user (useful for cross-user resource tests) or to use the values from all users and place them into their corresponding user's destination requests (useful for automation tasks like CSRF token retrieval)
 
-__NOTE:__ Requests are run in order of row, so the destination requests must be listed after any source requests in order to successfully replace the value.  Requests can be moved in the table by selecting and dragging the entry.
+__NOTE:__ Requests are run in order of row, however, if a chain dependency is detected, AuthMatrix will run the requests in the required order.
 
 
 ## Chains for CSRF
@@ -113,4 +115,7 @@ __NOTE:__ False positive detection and highlighting may not work in Failure Rege
 
 ![Sample Configuration with Failure Regex Mode](images/img3.png)
 
+## JSON State File
+
+[Refer to the JsonState document for details regarding the structure of state files](JsonState.md)
 

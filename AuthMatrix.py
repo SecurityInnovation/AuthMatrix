@@ -51,6 +51,7 @@ from javax.swing import JSeparator;
 from javax.swing import SwingConstants;
 from javax.swing import JList
 from javax.swing import AbstractCellEditor
+from javax.swing import Timer
 from java.awt.datatransfer import StringSelection;
 from java.awt.datatransfer import DataFlavor;
 from javax.swing.table import AbstractTableModel;
@@ -72,14 +73,16 @@ from threading import Lock
 from threading import Thread
 import traceback
 import re
-import urllib2
+import urllib
+import hashlib
 import json
 import base64
 import random
 import string
 
 
-AUTHMATRIX_VERSION = "0.7.1"
+AUTHMATRIX_VERSION = "0.8"
+
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
     
@@ -125,8 +128,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # Set Messages to reorderable
         self._messageTable.setDragEnabled(True)
         self._messageTable.setDropMode(DropMode.INSERT_ROWS)
-        self._messageTable.setTransferHandler(MessageTableRowTransferHandler(self._messageTable))                
+        self._messageTable.setTransferHandler(RowTransferHandler(self._messageTable))                
 
+        # Set Users to reorderable
+        self._userTable.setDragEnabled(True)
+        self._userTable.setDropMode(DropMode.INSERT_ROWS)
+        self._userTable.setTransferHandler(RowTransferHandler(self._userTable))                
 
 
 
@@ -171,6 +178,44 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     t.start()
                     selfExtender._selectedColumn = -1
                     # Redrawing the table happens in colorcode within the thread
+
+        class actionToggleEnableUser(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._userTable.getSelectedRows():
+                        usersArray = [selfExtender._db.getUserByRow(selfExtender._selectedRow)]
+                    else:
+                        usersArray = [selfExtender._db.getUserByRow(rowNum) for rowNum in selfExtender._userTable.getSelectedRows()]
+                    for userEntry in usersArray:
+                        userEntry.toggleEnabled()
+                    selfExtender._selectedColumn = -1
+                    selfExtender._userTable.redrawTable()
+
+        class actionToggleEnableMessage(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._messageTable.getSelectedRows():
+                        messagesArray = [selfExtender._db.getMessageByRow(selfExtender._selectedRow)]
+                    else:
+                        messagesArray = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
+                    for messageEntry in messagesArray:
+                        messageEntry.toggleEnabled()
+                    selfExtender._selectedColumn = -1
+                    selfExtender._messageTable.redrawTable()
+
+        class actionToggleEnableChain(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._chainTable.getSelectedRows():
+                        chainArray = [selfExtender._db.getChainByRow(selfExtender._selectedRow)]
+                    else:
+                        chainArray = [selfExtender._db.getChainByRow(rowNum) for rowNum in selfExtender._chainTable.getSelectedRows()]
+                    for chainEntry in chainArray:
+                        chainEntry.toggleEnabled()
+                    selfExtender._selectedColumn = -1
+                    selfExtender._chainTable.redrawTable()
+
+
 
         class actionRemoveMessage(ActionListener):
             def actionPerformed(self,e):
@@ -254,6 +299,27 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
 
+        class actionChangeRegexes(ActionListener):
+            def actionPerformed(self,e):
+                if selfExtender._selectedRow >= 0:
+                    if selfExtender._selectedRow not in selfExtender._messageTable.getSelectedRows():
+                        messages = [selfExtender._db.getMessageByRow(selfExtender._selectedRow)]
+                    else:
+                        messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
+
+                    newRegex,failureRegex = selfExtender.changeRegexPopup()
+                    if newRegex:
+                        for message in messages:
+                            message._regex = newRegex
+                            message.setFailureRegex(failureRegex)
+                        # Add to list of regexes if its not already there
+                        if newRegex not in selfExtender._db.arrayOfRegexes:
+                            selfExtender._db.arrayOfRegexes.append(newRegex)
+
+                    selfExtender._selectedColumn = -1
+                    selfExtender._messageTable.redrawTable()
+
+
         class actionChangeDomain(ActionListener):
             def replaceDomain(self, requestResponse, newDomain):
                 requestInfo = selfExtender._helpers.analyzeRequest(requestResponse)
@@ -268,8 +334,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         messages = [selfExtender._db.getMessageByRow(selfExtender._selectedRow)]
                     else:
                         messages = [selfExtender._db.getMessageByRow(rowNum) for rowNum in selfExtender._messageTable.getSelectedRows()]
-
-                    service = None if len(messages)>1 else messages[0]._requestResponse.getHttpService()
+                    
+                    # Autofill the service values if they are all the same
+                    uniqueServices = [(message._requestResponse.getHttpService().getHost(),
+                        message._requestResponse.getHttpService().getPort(),
+                        message._requestResponse.getHttpService().getProtocol()) for message in messages]
+                    service = None if len(set(uniqueServices)) != 1 else messages[0]._requestResponse.getHttpService()
 
                     ok, host, port, tls, replaceHost = selfExtender.changeDomainPopup(service)
                     if ok and host:
@@ -289,18 +359,24 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # Message Table popups
         messagePopup = JPopupMenu()
         addPopup(self._messageTable,messagePopup)
+        toggleEnabled = JMenuItem("Disable/Enable Request(s)")
+        toggleEnabled.addActionListener(actionToggleEnableMessage())
+        messagePopup.add(toggleEnabled)
         messageRun = JMenuItem("Run Request(s)")
         messageRun.addActionListener(actionRunMessage())
         messagePopup.add(messageRun)
-        messageRemove = JMenuItem("Remove Request(s)")
-        messageRemove.addActionListener(actionRemoveMessage())
-        messagePopup.add(messageRemove)
         toggleRegex = JMenuItem("Toggle Regex Mode (Success/Failure)")
         toggleRegex.addActionListener(actionToggleRegex())
         messagePopup.add(toggleRegex)
+        changeRegex = JMenuItem("Change Regexes")
+        changeRegex.addActionListener(actionChangeRegexes())
+        messagePopup.add(changeRegex)
         changeDomain = JMenuItem("Change Target Domain")
         changeDomain.addActionListener(actionChangeDomain())
         messagePopup.add(changeDomain)
+        messageRemove = JMenuItem("Remove Request(s)")
+        messageRemove.addActionListener(actionRemoveMessage())
+        messagePopup.add(messageRemove)
         
 
 
@@ -313,9 +389,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # User Table popup
         userPopup = JPopupMenu()
         addPopup(self._userTable,userPopup)
+        toggleEnabled = JMenuItem("Disable/Enable User(s)")
+        toggleEnabled.addActionListener(actionToggleEnableUser())
+        userPopup.add(toggleEnabled)
         userRemove = JMenuItem("Remove Users(s)")
         userRemove.addActionListener(actionRemoveUser())
         userPopup.add(userRemove)
+
 
         userHeaderPopup = JPopupMenu()
         addPopup(self._userTable.getTableHeader(),userHeaderPopup)
@@ -326,6 +406,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # Chain Table popup
         chainPopup = JPopupMenu()
         addPopup(self._chainTable,chainPopup)
+        toggleEnabled = JMenuItem("Disable/Enable Chain(s)")
+        toggleEnabled.addActionListener(actionToggleEnableChain())
+        chainPopup.add(toggleEnabled)
         chainRemove = JMenuItem("Remove Chain(s)")
         chainRemove.addActionListener(actionRemoveChain())
         chainPopup.add(chainRemove)
@@ -404,10 +487,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._topPane.setResizeWeight(0.85)
         bottomPane.setResizeWeight(0.95)
 
-        # Handles checkbox color coding
+        # Handles checkbox, regex, and enabled coloring
         # Must be bellow the customizeUiComponent calls
         self._messageTable.setDefaultRenderer(Boolean, SuccessBooleanRenderer(self._messageTable.getDefaultRenderer(Boolean), self._db))
         self._messageTable.setDefaultRenderer(str, RegexRenderer(self._messageTable.getDefaultRenderer(str), self._db))
+        self._userTable.setDefaultRenderer(str, UserEnabledRenderer(self._userTable.getDefaultRenderer(str), self._db))
+        self._userTable.setDefaultRenderer(Boolean, UserEnabledRenderer(self._userTable.getDefaultRenderer(Boolean), self._db))
+        self._chainTable.setDefaultRenderer(str, ChainEnabledRenderer(self._chainTable.getDefaultRenderer(str), self._db))
+
 
         # add the custom tab to Burp's UI
         callbacks.addSuiteTab(self)        
@@ -427,12 +514,36 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def getUiComponent(self):
         return self._splitpane
        
+    def highlightTab(self):
+        currentPane = self._splitpane
+        previousPane = currentPane
+        while currentPane and not isinstance(currentPane, JTabbedPane):
+            previousPane = currentPane
+            currentPane = currentPane.getParent()
+        if currentPane:
+            index = currentPane.indexOfComponent(previousPane)
+            # TODO use old background instead of black (currently doesnt work)
+            #oldBackground = currentPane.getBackgroundAt(index)
+            currentPane.setBackgroundAt(index,self._db.BURP_ORANGE)
+
+            class setColorBackActionListener(ActionListener):
+                def actionPerformed(self, e):
+                    currentPane.setBackgroundAt(index,Color.BLACK)
+                    
+            timer = Timer(5000, setColorBackActionListener())
+            timer.setRepeats(False)
+            timer.start()
+
+
 
     ##
     ## Creates the sendto tab in other areas of Burp
     ##
 
     def createMenuItems(self, invocation):
+
+        
+
 
         def addRequestsToTab(e):
             for messageInfo in messages:
@@ -451,6 +562,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 messageIndex = self._db.createNewMessage(RequestResponseStored(self,requestResponse=messageInfo), name, regex)
             self._messageTable.redrawTable()
             self._chainTable.redrawTable()
+            self.highlightTab()
+
 
         class UserCookiesActionListener(ActionListener):
             def __init__(self, currentUser, extender):
@@ -477,6 +590,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     self.currentUser._cookies = cookieVal
 
                 self.extender._userTable.redrawTable()
+                self.extender.highlightTab()
 
         ret = []
         messages = invocation.getSelectedMessages()
@@ -495,7 +609,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
             if len(messages)==1:
                 # Send cookies to user:
-                for user in [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]:
+                for user in self._db.getUsersInOrderByRow():
                     menuItem = JMenuItem("Send cookies to AuthMatrix user: "+user._name);
                     menuItem.addActionListener(UserCookiesActionListener(user, self))
                     ret.append(menuItem)
@@ -567,7 +681,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if result != JOptionPane.YES_OPTION:
                     return
             fileName = f.getPath()
-            # TODO Bug here.  Check if the value being written is 0 before opening
+            # TODO Potential bug here.  Check if the value being written is 0 before opening
             # TODO add a try catch here?
             jsonValue = self._db.getSaveableJson()
             if jsonValue:
@@ -575,7 +689,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 fileout.write(jsonValue)
                 fileout.close()
             else:
-                # TODO pop up error
+                # TODO popup errors instead of prints
                 print "Error: Save Failed. JSON empty."
             # TODO currently this will save the config to burp, but not to a specific project
             # Will also need an export and loadFromFile feature if this is ever implemented
@@ -634,6 +748,40 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         t = Thread(target=self.runMessagesThread)
         self._tabs.removeAll()
         t.start()
+
+    def changeRegexPopup(self):
+        regexComboBox = JComboBox(self._db.arrayOfRegexes)
+        regexComboBox.setEditable(True)
+        failureModeCheckbox = JCheckBox()
+
+        panel = JPanel(GridBagLayout())
+        gbc = GridBagConstraints()
+        gbc.anchor = GridBagConstraints.WEST
+        firstline = JPanel()
+        firstline.add(JLabel("Select a Regex for all selected Requests:"))
+        secondline = JPanel()
+        secondline.add(regexComboBox)
+        thirdline = JPanel()
+        thirdline.add(failureModeCheckbox)
+        thirdline.add(JLabel("Regex Detects Unauthorized Requests (Failure Mode)"))
+
+
+        gbc.gridy = 0
+        panel.add(firstline,gbc)
+        gbc.gridy = 1
+        panel.add(secondline, gbc)
+        gbc.gridy = 2
+        panel.add(thirdline, gbc)
+
+
+        result = JOptionPane.showConfirmDialog(self._splitpane, panel, "Select Response Regex", JOptionPane.OK_CANCEL_OPTION)
+        value = regexComboBox.getSelectedItem() 
+        if result == JOptionPane.CANCEL_OPTION or not value:
+            return None, None
+        return value, failureModeCheckbox.isSelected()
+
+
+
 
     def changeDomainPopup(self, service):
         hostField = JTextField(25)
@@ -758,9 +906,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 indexes = self._db.getActiveMessageIndexes()
             self.clearColorResults(indexes)
             # Run in order of row, not by index
+            messagesThatHaveRun = []
             for message in self._db.getMessagesInOrderByRow():
+                # Only run if message is in the selected indexes (NOTE: dependencies will be run even if not selected)
                 if message._index in indexes:
-                    self.runMessage(message._index)
+                    messagesThatHaveRun = self.runMessageAndDependencies(message._index, messagesThatHaveRun, [])
 
         except:
             traceback.print_exc(file=self._callbacks.getStderr())
@@ -769,10 +919,36 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._db.lock.release()
             self._messageTable.redrawTable()
 
+    def runMessageAndDependencies(self, messageIndex, messagesThatHaveRun, recursionCheckArray):
+        messageEntry = self._db.arrayOfMessages[messageIndex]
+        updatedMessagesThatHaveRun = messagesThatHaveRun[:]
+        updatedRecursionCheckArray = recursionCheckArray[:]
+
+        if messageIndex in updatedRecursionCheckArray:
+            print "Error: Recursion detected in message chains: "+"->".join([str(i) for i in updatedRecursionCheckArray])+"->"+str(messageIndex)
+
+        elif (messageIndex not in updatedMessagesThatHaveRun 
+            and messageEntry.isEnabled() 
+            and messageIndex in self._db.getActiveMessageIndexes()):
+                updatedRecursionCheckArray.append(messageIndex)
+                for chainIndex in self._db.getActiveChainIndexes():
+                    # Run any dependencies first
+                    chainEntry = self._db.arrayOfChains[chainIndex]
+                    if (messageIndex in chainEntry.getToIDRange() 
+                        and chainEntry.isEnabled() 
+                        and str(chainEntry._fromID).isdigit() 
+                        and int(chainEntry._fromID) >= 0):
+                            updatedMessagesThatHaveRun = self.runMessageAndDependencies(int(chainEntry._fromID), updatedMessagesThatHaveRun, updatedRecursionCheckArray)
+                self.runMessage(messageIndex)
+                # print messageIndex
+                updatedMessagesThatHaveRun.append(messageIndex)
+
+        return updatedMessagesThatHaveRun
+
 
     def runMessage(self, messageIndex):
 
-        # TODO: this uses hacky threading tricks for handling timeouts, find a better way
+        # NOTE: this uses hacky threading tricks for handling timeouts
         tempRequestResponse = []
         index = 0
         def loadRequestResponse(index, service, message):
@@ -794,91 +970,101 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         messageInfo = messageEntry._requestResponse
         requestInfo = self._helpers.analyzeRequest(messageInfo)
         reqBody = messageInfo.getRequest()[requestInfo.getBodyOffset():]
-        for userIndex in self._db.getActiveUserIndexes():
+
+
+        for userIndex in [userEntry._index for userEntry in self._db.getUsersInOrderByRow()]:
             # Handle cancel button early exit here
             if self._runCancelled:
                 return
 
-
             userEntry = self._db.arrayOfUsers[userIndex]
-            newHeaders = ModifyMessage.getNewHeaders(requestInfo, userEntry._cookies, userEntry._headers)
-            newBody = reqBody
-
-            # Replace with Chain
-            for toRegex, toValue in userEntry.getChainResultByMessageIndex(messageIndex):
-                newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
-                newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
-
-            # Replace with SV
-            # toValue = SV, toRegex = toRegex
-            for chain in [self._db.arrayOfChains[i] for i in self._db.getActiveChainIndexes()]:
-                svName = chain.getSVName()
-                if svName and messageIndex in chain.getToIDRange():
-                    # get toValue for correct source
-                    sourceUser = chain._sourceUser if chain._sourceUser>=0 else userIndex
-                    # Check that sourceUser is active
-                    if sourceUser in self._db.getActiveUserIndexes():
-                        toValue = self._db.getSVByName(svName).getValueForUserIndex(sourceUser)
-                        toRegex = chain._toRegex
-                        newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
-                        newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
-
-            # Replace Custom Special Types (i.e. Random)
-            newBody = StringUtil.toBytes(ModifyMessage.customReplace([StringUtil.fromBytes(newBody)])[0])
-            newHeaders = ModifyMessage.customReplace(newHeaders)
-
-            # Construct and send a message with the new headers
-            message = self._helpers.buildHttpMessage(newHeaders, newBody)
-
-
-            # Run with threading to timeout correctly   
-            tempRequestResponse.append(None)         
-            t = Thread(target=loadRequestResponse, args = [index,messageInfo.getHttpService(),message])
-            t.start()
-            t.join(self._db.LOAD_TIMEOUT)
-
-            # Create default requestResponse without response
-            requestResponse = RequestResponseStored(self, 
-                request=message, 
-                httpService=messageInfo.getHttpService())
-
-            if t.isAlive():
-                print "ERROR: Request Timeout for Request #"+str(messageIndex)+" and User #"+str(userIndex)
-            elif tempRequestResponse[index]:
-                requestResponse = RequestResponseStored(self,requestResponse=tempRequestResponse[index])
-            
-            messageEntry.addRunByUserIndex(userIndex, requestResponse)
-
-            # Get Chain Result
-            response = requestResponse.getResponse()
-            if not response:
-                print "ERROR: No HTTP Response for Request #"+str(messageIndex)+" and User #"+str(userIndex)
-            else:
-                response = StringUtil.fromBytes(response)
-                for chain in [self._db.arrayOfChains[c] for c in self._db.getActiveChainIndexes()]:
-                    # This wont have issues with SV because of the prefix never matching the index
-                    if str(chain._fromID) == str(messageIndex):
-                        # If a sourceUser is set, replace for all users' chain results
-                        # Else, replace each user's chain results individually
-                        replace = True
-                        affectedUsers = [userEntry]
-                        if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0:
-                            if str(chain._sourceUser) == str(userIndex):
-                                affectedUsers = [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]
-                            else:
-                                replace = False
-
-                        if replace:
-                            result = ""
-                            if chain._fromRegex:
-                                match = re.search(chain._fromRegex, response, re.DOTALL)
-                                if match and len(match.groups()):
-                                    result = match.group(1)
-                                
-                            for toID in chain.getToIDRange():
-                                for affectedUser in affectedUsers:
-                                    affectedUser.addChainResultByMessageIndex(toID, chain._toRegex, result)
-            index +=1
+            # Only run if the user is enabled
+            if userEntry.isEnabled():
+                newHeaders = ModifyMessage.getNewHeaders(requestInfo, userEntry._cookies, userEntry._headers)
+                newBody = reqBody
+    
+                # Replace with Chain
+                for toValue, chainIndex in userEntry.getChainResultByMessageIndex(messageIndex):
+                    # Add transformers
+                    chain = self._db.arrayOfChains[chainIndex]
+                    toValue = chain.transform(toValue, self._callbacks)       
+                    toRegex = chain._toRegex
+                    newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
+                    newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
+    
+                # Replace with SV
+                # toValue = SV, toRegex = toRegex
+                for chain in [self._db.arrayOfChains[i] for i in self._db.getActiveChainIndexes()]:
+                    svName = chain.getSVName()
+                    # If the Chain Source exists, and this message is affected, and the chain is enabled
+                    if svName and messageIndex in chain.getToIDRange() and chain.isEnabled():
+                        # get toValue for correct source
+                        sourceUser = chain._sourceUser if chain._sourceUser>=0 else userIndex
+                        # Check that sourceUser is active
+                        if sourceUser in self._db.getActiveUserIndexes():
+                            toValue = self._db.getSVByName(svName).getValueForUserIndex(sourceUser)
+                            # Add transformers
+                            toValue = chain.transform(toValue, self._callbacks)
+                            toRegex = chain._toRegex
+                            newBody = StringUtil.toBytes(ModifyMessage.chainReplace(toRegex,toValue,[StringUtil.fromBytes(newBody)])[0])
+                            newHeaders = ModifyMessage.chainReplace(toRegex,toValue,newHeaders)
+    
+                # Replace Custom Special Types (i.e. Random)
+                newBody = StringUtil.toBytes(ModifyMessage.customReplace([StringUtil.fromBytes(newBody)])[0])
+                newHeaders = ModifyMessage.customReplace(newHeaders)
+    
+                # Construct and send a message with the new headers
+                message = self._helpers.buildHttpMessage(newHeaders, newBody)
+    
+    
+                # Run with threading to timeout correctly   
+                tempRequestResponse.append(None)         
+                t = Thread(target=loadRequestResponse, args = [index,messageInfo.getHttpService(),message])
+                t.start()
+                t.join(self._db.LOAD_TIMEOUT)
+    
+                # Create default requestResponse without response
+                requestResponse = RequestResponseStored(self, 
+                    request=message, 
+                    httpService=messageInfo.getHttpService())
+    
+                if t.isAlive():
+                    print "ERROR: Request Timeout for Request #"+str(messageIndex)+" and User #"+str(userIndex)
+                elif tempRequestResponse[index]:
+                    requestResponse = RequestResponseStored(self,requestResponse=tempRequestResponse[index])
+                
+                messageEntry.addRunByUserIndex(userIndex, requestResponse)
+    
+                # Get Chain Result
+                response = requestResponse.getResponse()
+                if not response:
+                    print "ERROR: No HTTP Response for Request #"+str(messageIndex)+" and User #"+str(userIndex)
+                else:
+                    response = StringUtil.fromBytes(response)
+                    for chain in [self._db.arrayOfChains[c] for c in self._db.getActiveChainIndexes()]:
+                        # This wont have issues with SV because of the prefix never matching the index
+                        if str(chain._fromID) == str(messageIndex) and chain.isEnabled():
+                            # If a sourceUser is set, replace for all users' chain results
+                            # Else, replace each user's chain results individually
+                            replace = True
+                            affectedUsers = [userEntry]
+                            if str(chain._sourceUser).isdigit() and chain._sourceUser >= 0: # TODO (0.9): why .isdigit()? Can this line just be removed
+                                if str(chain._sourceUser) == str(userIndex):
+                                    affectedUsers = self._db.getUsersInOrderByRow()
+                                else:
+                                    replace = False
+    
+                            if replace:
+                                result = ""
+                                if chain._fromRegex:
+                                    match = re.search(chain._fromRegex, response, re.DOTALL)
+                                    if match and len(match.groups()):
+                                        result = match.group(1)
+                                    
+                                for toID in chain.getToIDRange():
+                                    for affectedUser in affectedUsers:
+                                        affectedUser.addChainResultByMessageIndex(toID, result, chain._index)
+                index +=1
 
         # Grab all active roleIndexes that are checkboxed
         activeCheckBoxedRoles = [index for index in messageEntry._roles.keys() if messageEntry._roles[index] and not self._db.arrayOfRoles[index].isDeleted()]
@@ -899,7 +1085,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._messageTable.redrawTable()
 
     def checkResult(self, messageEntry, roleIndex, activeCheckBoxedRoles):
-        for userEntry in [self._db.arrayOfUsers[i] for i in self._db.getActiveUserIndexes()]:
+        for userEntry in self._db.getUsersInOrderByRow():
 
             ignoreUser = False
 
@@ -908,7 +1094,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             # if user is not in this role, ignore it
             if not userEntry._roles[roleIndex]:
                 ignoreUser = True
-
+            elif not userEntry.isEnabled():
+                ignoreUser = True
             else:
                 # If user is in any other checked role, then ignore it
                 for index in self._db.getActiveRoleIndexes():
@@ -1016,7 +1203,6 @@ class ModifyMessage():
     @staticmethod
     def chainReplace(toRegex, toValue, toArray):
         # TODO clean up so that the input is headers+body and its called only once
-        # TODO support encoding, including URL encode
         isBody = len(toArray)==1
         if toRegex:
             # BUG FIX: Geoff reported that if the regex ends at the newline on the last header,
@@ -1065,9 +1251,9 @@ class MatrixDB():
         # NOTE: consider moving these constants to a different class
         self.STATIC_USER_TABLE_COLUMN_COUNT = 2
         self.STATIC_MESSAGE_TABLE_COLUMN_COUNT = 3
-        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 6
+        self.STATIC_CHAIN_TABLE_COLUMN_COUNT = 7
         self.LOAD_TIMEOUT = 10.0
-        self.BURP_SELECTED_CELL_COLOR = Color(0xFF,0xCD,0x81)
+        self.BURP_ORANGE = Color(0xff6633)
 
         self.lock = Lock()
         self.arrayOfMessages = ArrayList()
@@ -1080,6 +1266,7 @@ class MatrixDB():
         self.deletedChainCount = 0
         self.arrayOfSVs = ArrayList()
         self.headerCount = 0
+        self.arrayOfRegexes = []
 
 
     # Returns the index of the user, whether its new or not
@@ -1174,6 +1361,11 @@ class MatrixDB():
         for roleIndex in self.getActiveRoleIndexes():
             self.arrayOfMessages[messageIndex].addRoleByIndex(roleIndex)
 
+        # Add regex to array if its new
+        if regex and regex not in self.arrayOfRegexes:
+            self.arrayOfRegexes.append(regex)
+
+
         self.lock.release()
         return messageIndex
 
@@ -1208,6 +1400,7 @@ class MatrixDB():
         self.deletedChainCount = 0
         self.arrayOfSVs = ArrayList()
         self.headerCount = 0
+        self.arrayOfRegexes = []
         self.lock.release()
 
     def loadLegacy(self, fileName, extender):
@@ -1234,6 +1427,7 @@ class MatrixDB():
         self.deletedChainCount = 0 # Updated with chain entries below in arrayOfUsers
         self.arrayOfSVs = ArrayList()
         self.headerCount = 1 # Legacy states had one header only
+        self.arrayOfRegexes = []
 
         for message in db.arrayOfMessages:
             if message._successRegex.startswith(FAILURE_REGEX_SERIALIZE_CODE):
@@ -1312,121 +1506,264 @@ class MatrixDB():
         # This replacement might have weird results, but most are mitigated by using base64 encoding
         jsonFixed = jsonText.replace(": False",": false").replace(": True",": true")
 
-        stateDict = json.loads(jsonFixed)
+        # Get Rid of comments
+        jsonFixed = re.sub(r"[/][*]([^*]|([*][^/]))*[*][/]", "", jsonFixed, 0, re.MULTILINE)
+
+        try:
+            stateDict = json.loads(jsonFixed)
+        except:
+            print jsonFixed
+            traceback.print_exc(file=extender._callbacks.getStderr())
+            return
 
         version = stateDict["version"]
         if version > AUTHMATRIX_VERSION:
             print "Invalid Version in State File ("+version+")"
             return
 
+        backupState = self.getSaveableJson()
+
         self.lock.acquire()
-        self.arrayOfUsers = ArrayList()
-        self.arrayOfRoles = ArrayList()
-        self.arrayOfMessages = ArrayList()
-        self.arrayOfChains = ArrayList()
-        self.deletedUserCount = stateDict["deletedUserCount"]
-        self.deletedRoleCount = stateDict["deletedRoleCount"]
-        self.deletedMessageCount = stateDict["deletedMessageCount"]
-        self.deletedChainCount = stateDict["deletedChainCount"]
-        self.arrayOfSVs = ArrayList()
 
-        self.headerCount = 1
-        if version >= "0.7":
-            if "headerCount" in stateDict:
-                self.headerCount = stateDict["headerCount"]
-            if "arrayOfSVs" in stateDict:
-                for svEntry in stateDict["arrayOfSVs"]:
-                    self.arrayOfSVs.add(SVEntry(
-                        svEntry["name"],
-                        {int(x): svEntry["userValues"][x] for x in svEntry["userValues"].keys()}, # convert keys to ints
+        try:
+    
+            # NOTE: As of 0.8, If the state file is missing an element, then it assumes it is 
+            # the intention of the user to not modify that array, so that just small bits can be updated.
+            
+            # NOTE: As of 0.8 the deleted counts and header counts are filled in using the values found in each array
+    
+            # TODO (0.9): every field that has "{int(x" is using an ID in the state that is not obvious to the user
+    
+            if "arrayOfRoles" in stateDict:
+                self.arrayOfRoles = ArrayList()
+                self.deletedRoleCount = 0
+    
+                # (self,index,columnIndex,name,deleted=False,singleUser=False):
+                for roleEntry in stateDict["arrayOfRoles"]:
+                    deleted = False if "deleted" not in roleEntry else roleEntry["deleted"]
+                    if deleted:
+                        self.deletedRoleCount += 1
+        
+                    self.arrayOfRoles.add(RoleEntry(
+                        roleEntry["index"],
+                        roleEntry["column"],
+                        roleEntry["name"],
+                        deleted = deleted,
+                        singleUser = False if version < "0.7" or "singleUser" not in roleEntry else roleEntry["singleUser"]
                         ))
-
-        for roleEntry in stateDict["arrayOfRoles"]:
-            # Version: singleUser type roles added in v0.7
-            if version < "0.7":
-                singleUser = False
-            else:
-                singleUser = roleEntry["singleUser"]
-
-            self.arrayOfRoles.add(RoleEntry(
-                roleEntry["index"],
-                roleEntry["column"],
-                roleEntry["name"],
-                roleEntry["deleted"],
-                singleUser))
-
-
-        for userEntry in stateDict["arrayOfUsers"]:
-
-            # Suppport old and new header versions
-            if "headersBase64" in userEntry:
-                headers = [base64.b64decode(x) for x in userEntry["headersBase64"]]
-                if not userEntry["deleted"]:
-                    assert(len(headers)==self.headerCount)
-            elif "headerBase64" in userEntry and self.headerCount ==1:
-                headers = [base64.b64decode(userEntry["headerBase64"])]
-            else:     
-                headers = [""]*self.headerCount
-
-            self.arrayOfUsers.add(UserEntry(
-                userEntry["index"],
-                userEntry["tableRow"],
-                userEntry["name"],
-                {int(x): userEntry["roles"][x] for x in userEntry["roles"].keys()}, # convert keys to ints
-                userEntry["deleted"],
-                base64.b64decode(userEntry["cookiesBase64"]),
-                headers=headers))
-
-        # NOTE: leaving out chainResults
+    
+            if "arrayOfUsers" in stateDict:
+                self.arrayOfUsers = ArrayList()
+                self.deletedUserCount = 0
+                self.headerCount = 0
+                self.arrayOfSVs = ArrayList()
+    
+                # NOTE: leaving out chainResults
+                # (self, index, tableRow, name, roles = {}, deleted=False, cookies="", headers = [], enabled = True):
+                for userEntry in stateDict["arrayOfUsers"]:
+                    deleted = False if "deleted" not in userEntry else userEntry["deleted"]
+                    if deleted:
+                        self.deletedUserCount += 1
+    
+    
+    
+                    # Suppport old and new header versions
+                    if "headersBase64" in userEntry:
+                        headers = [base64.b64decode(x) for x in userEntry["headersBase64"]]
+                        # Grab the number of headers. Sanity check will later confirm that each user has the right number of headers
+                        if self.headerCount == 0:
+                            self.headerCount = len(headers)
+                    elif "headerBase64" in userEntry:
+                        self.headerCount = 1
+                        headers = [base64.b64decode(userEntry["headerBase64"])]
+                    else:     
+                        headers = [""]*self.headerCount
         
-        for messageEntry in stateDict["arrayOfMessages"]:
-            requestResponse = None if messageEntry["deleted"] else RequestResponseStored(
-                    extender,
-                    messageEntry["host"],
-                    messageEntry["port"],
-                    messageEntry["protocol"],
-                    StringUtil.toBytes(base64.b64decode(messageEntry["requestBase64"])))
-
-            self.arrayOfMessages.add(MessageEntry(
-                messageEntry["index"],
-                messageEntry["tableRow"],
-                requestResponse,
-                messageEntry["name"], 
-                {int(x): messageEntry["roles"][x] for x in messageEntry["roles"].keys()}, # convert keys to ints
-                base64.b64decode(messageEntry["regexBase64"]), 
-                messageEntry["deleted"], 
-                messageEntry["failureRegexMode"]))
-
-        # TODO roleResults and userRuns (need to convert keys)
-
-        for chainEntry in stateDict["arrayOfChains"]:
-            self.arrayOfChains.add(ChainEntry(
-                chainEntry["index"],
-                chainEntry["tableRow"],
-                chainEntry["name"],
-                chainEntry["fromID"],
-                base64.b64decode(chainEntry["fromRegexBase64"]),
-                chainEntry["toID"],
-                base64.b64decode(chainEntry["toRegexBase64"]),
-                chainEntry["deleted"],
-                chainEntry["sourceUser"]
-                ))
+                    
+                    self.arrayOfUsers.add(UserEntry(
+                        userEntry["index"],
+                        userEntry["tableRow"],
+                        userEntry["name"],
+                        {int(x): userEntry["roles"][x] for x in userEntry["roles"].keys()}, # convert keys to ints
+                        deleted = deleted,
+                        cookies = "" if "cookiesBase64" not in userEntry else base64.b64decode(userEntry["cookiesBase64"]),
+                        headers = headers,
+                        enabled = True if "enabled" not in userEntry else userEntry["enabled"]
+                        ))
+    
+                # Update Static Values
+                keyword = "arrayOfChainSources" if version >= "0.8" else "arrayOfSVs"
+                if keyword in stateDict:
+                    for svEntry in stateDict[keyword]:
+                        # If the index does not match an active users, do not include it
+                        self.arrayOfSVs.add(SVEntry(
+                            svEntry["name"],
+                            {int(x): svEntry["userValues"][x] for x in svEntry["userValues"].keys() if int(x) in self.getActiveUserIndexes()}, # convert keys to ints
+                            ))
+    
+    
+            if "arrayOfMessages" in stateDict:
+                self.arrayOfMessages = ArrayList()
+                self.deletedMessageCount = 0
+                self.arrayOfRegexes = []
+    
+                # NOTE leaving out roleResults and userRuns (need to convert keys)
+                # (self, index, tableRow, requestResponse, name = "", roles = {}, regex = "", deleted = False, failureRegexMode = False, enabled = True):
+                for messageEntry in stateDict["arrayOfMessages"]:
+                    deleted = False if "deleted" not in messageEntry else messageEntry["deleted"]
+                    if deleted:
+                        self.deletedMessageCount += 1
         
-        # NOTE: leaving out fromStart, fromEnd, toStart, toEnd
-
+                    regex = "" if "regexBase64" not in messageEntry else base64.b64decode(messageEntry["regexBase64"])
+        
+                    if regex and regex not in self.arrayOfRegexes:
+                        self.arrayOfRegexes.append(regex)
+        
+                    requestResponse = None if deleted else RequestResponseStored(
+                            extender,
+                            messageEntry["host"],
+                            messageEntry["port"],
+                            messageEntry["protocol"],
+                            StringUtil.toBytes(base64.b64decode(messageEntry["requestBase64"])))
+        
+                    self.arrayOfMessages.add(MessageEntry(
+                        messageEntry["index"],
+                        messageEntry["tableRow"],
+                        requestResponse,
+                        messageEntry["name"], 
+                        {int(x): messageEntry["roles"][x] for x in messageEntry["roles"].keys()}, # convert keys to ints
+                        regex = regex, 
+                        deleted = deleted, 
+                        failureRegexMode = False if "failureRegexMode" not in messageEntry else messageEntry["failureRegexMode"],
+                        enabled = True if "enabled" not in messageEntry else messageEntry["enabled"]
+                        ))
+    
+    
+            if "arrayOfChains" in stateDict:
+                self.arrayOfChains = ArrayList()
+                self.deletedChainCount = 0
+    
+                # NOTE: leaving out fromStart, fromEnd, toStart, toEnd
+                for chainEntry in stateDict["arrayOfChains"]:
+                    deleted = False if "deleted" not in chainEntry else chainEntry["deleted"]
+                    if deleted:
+                        self.deletedChainCount += 1
+        
+                    self.arrayOfChains.add(ChainEntry(
+                        chainEntry["index"],
+                        chainEntry["tableRow"],
+                        name = "" if "name" not in chainEntry else chainEntry["name"],
+                        fromID = "" if "fromID" not in chainEntry else chainEntry["fromID"],
+                        fromRegex = "" if "fromRegexBase64" not in chainEntry else base64.b64decode(chainEntry["fromRegexBase64"]),
+                        toID = "" if "toID" not in chainEntry else chainEntry["toID"],
+                        toRegex = "" if "toRegexBase64" not in chainEntry else base64.b64decode(chainEntry["toRegexBase64"]),
+                        deleted = deleted,
+                        sourceUser = -1 if "sourceUser" not in chainEntry else chainEntry["sourceUser"],
+                        enabled = True if "enabled" not in chainEntry else chainEntry["enabled"],
+                        transformers = [] if "transformers" not in chainEntry else chainEntry["transformers"]
+                        ))
+        
+        except:
+            self.lock.release()
+            print "Corrupt State File: Reverting back to original. (See stderr for more detail)"
+            traceback.print_exc(file=extender._callbacks.getStderr())
+            self.loadJson(backupState,extender)
+            return
 
         self.lock.release()
 
+        # Sanity checks
+        sanityResult = self.sanityCheck(extender)
+        if sanityResult:
+            print "Error parsing state file: "+sanityResult
+            # Revert to the backup state
+            self.loadJson(backupState,extender)
+
+
+
+    def sanityCheck(self, extender):
+        try:
+            # Returns an error string if the DB is in a corrupt state, else returns None
+            userIndexes = self.getActiveUserIndexes() 
+            roleIndexes = self.getActiveRoleIndexes()
+            messageIndexes = self.getActiveMessageIndexes()
+            chainIndexes = self.getActiveChainIndexes()
+    
+            # Index Checks
+            for indexes, currentArray, deletedCount in [
+                (userIndexes, self.arrayOfUsers, self.deletedUserCount),
+                (roleIndexes, self.arrayOfRoles, self.deletedRoleCount),
+                (messageIndexes, self.arrayOfMessages, self.deletedMessageCount),
+                (chainIndexes, self.arrayOfChains, self.deletedChainCount)]:
+                    # Check that indexes are all unique
+                    if len(indexes) > len(set(indexes)):
+                        return "Not All Indexes are Unique."
+                    # Check that the DB array has the correct number of items
+                    if len(currentArray) != len(indexes) + deletedCount:
+                        return "Array found with incorrect number of items."
+                    for currentIndex in indexes:
+                        if currentIndex < 0:
+                            return "Negative Index Found."
+                        # Check that all index values are below the length of active+deleted
+                        if currentIndex >= len(indexes)+deletedCount:
+                            return "Index Higher than Total Active + Deleted."
+                        # Check that the indexes within the array match the index of the Entry
+                        if currentIndex != currentArray[currentIndex]._index:
+                            return "Entries in the State File Arrays must be in order by index"
+    
+            # Row Checks
+            for indexes, currentArray in [             
+                (userIndexes, self.arrayOfUsers),
+                (messageIndexes, self.arrayOfMessages),
+                (chainIndexes, self.arrayOfChains)]:
+                    rowList = [currentArray[currentIndex].getTableRow() for currentIndex in indexes]
+                    # Check that the rows for a given table are all unique
+                    if len(rowList) > len(set(rowList)):
+                        return "Not all rows for a given table are unique."
+                    for row in rowList:
+                        # Check that rows are within appropriate bounds
+                        if row >= len(indexes) or row <0:
+                            return "Row out of bounds."
+    
+            # Column Checks
+            columnList = [self.arrayOfRoles[currentIndex].getColumn() for currentIndex in roleIndexes]
+            if len(columnList) > len(set(columnList)):
+                return "Not all columns for Roles array are unique."
+            for column in columnList:
+                if column < 0 or column >= len(roleIndexes):
+                    return "Column out of bounds."
+    
+            # Custom Headers checks
+            for userIndex in userIndexes:
+                if len(self.arrayOfUsers[userIndex]._headers) != self.headerCount:
+                    return "Incorrect Number of Headers for a User.  Must be "+str(self.headerCount)
+    
+            # Role Assignment Checks
+            for indexes, currentArray in [             
+                (userIndexes, self.arrayOfUsers),
+                (messageIndexes, self.arrayOfMessages)]:
+                    for index in indexes:
+                        # Check that all keys are unique (might be redundant)
+                        roleKeys = currentArray[index]._roles.keys()
+                        if len(roleKeys) > len(set(roleKeys)):
+                            return "Duplicate Keys on Roles Map"
+                        # Check that all active roles are covered in that items map
+                        for roleIndex in roleIndexes:
+                            if roleIndex not in roleKeys:
+                                return "Missing a Role Value in a Message or User"
+
+            # NOTE: Skipping Static Value check because a missing SV is handled gracefully
+
+            # TODO (0.9): check fromID and sourceUser in Chain
+
+        except:
+            traceback.print_exc(file=extender._callbacks.getStderr())
+            return "Unidentified"
+        return None
 
 
     def getSaveableJson(self):
-
-        stateDict = {"version":AUTHMATRIX_VERSION,
-        "deletedUserCount":self.deletedUserCount,
-        "deletedRoleCount":self.deletedRoleCount,
-        "deletedMessageCount":self.deletedMessageCount,
-        "deletedChainCount":self.deletedChainCount,
-        "headerCount":self.headerCount}
+        stateDict = {"version":AUTHMATRIX_VERSION}
 
         stateDict["arrayOfRoles"] = []
         for roleEntry in self.arrayOfRoles:
@@ -1447,6 +1784,7 @@ class MatrixDB():
                     "name":userEntry._name if not deleted else None,
                     "roles":userEntry._roles if not deleted else {},
                     "deleted":deleted,
+                    "enabled":userEntry._enabled,
                     "tableRow":userEntry._tableRow if not deleted else None,
                     "cookiesBase64":base64.b64encode(userEntry._cookies) if userEntry._cookies and not deleted else "",
                     "headersBase64":[base64.b64encode(x) if x else "" for x in userEntry._headers] if not deleted else [],
@@ -1467,6 +1805,7 @@ class MatrixDB():
                     "roles":messageEntry._roles if not deleted else {}, 
                     "regexBase64":base64.b64encode(messageEntry._regex) if messageEntry._regex and not deleted else "", 
                     "deleted":deleted,
+                    "enabled":messageEntry._enabled,
                     "failureRegexMode":messageEntry._failureRegexMode if not deleted else None,
                     "runBase64ForUserID":{int(x): {
                         "request": None if not messageEntry._userRuns[x] or not messageEntry._userRuns[x].getRequest() else base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getRequest())),
@@ -1485,18 +1824,20 @@ class MatrixDB():
                     "toID":chainEntry._toID if not deleted else None,
                     "toRegexBase64":base64.b64encode(chainEntry._toRegex) if chainEntry._toRegex and not deleted else "",
                     "deleted":deleted,
+                    "enabled":chainEntry._enabled,
                     "tableRow":chainEntry._tableRow if not deleted else None,
                     "name":chainEntry._name if not deleted else None,
                     "sourceUser":chainEntry._sourceUser if not deleted else None,
                     "fromStart":chainEntry._fromStart if not deleted else None,
                     "fromEnd":chainEntry._fromEnd if not deleted else None,
                     "toStart":chainEntry._toStart if not deleted else None,
-                    "toEnd":chainEntry._toEnd if not deleted else None
+                    "toEnd":chainEntry._toEnd if not deleted else None,
+                    "transformers":chainEntry._transformers if not deleted else []
                 })
 
-        stateDict["arrayOfSVs"] = []
+        stateDict["arrayOfChainSources"] = []
         for SVEntry in self.arrayOfSVs:
-            stateDict["arrayOfSVs"].append({
+            stateDict["arrayOfChainSources"].append({
                 "name":SVEntry._name,
                 "userValues":SVEntry._userValues
                 })
@@ -1627,6 +1968,12 @@ class MatrixDB():
             messages.append(self.getMessageByRow(i))
         return messages
 
+    def getUsersInOrderByRow(self):
+        users = []
+        for i in range(self.getActiveUserCount()):
+            users.append(self.getUserByRow(i))
+        return users
+
     def moveMessageToRow(self, fromRow, toRow):
         self.lock.acquire()
         messages = self.getMessagesInOrderByRow()
@@ -1639,8 +1986,22 @@ class MatrixDB():
             messages[fromRow].setTableRow(toRow-1)
             for i in range(fromRow+1,toRow):
                 messages[i].setTableRow(i-1)
-
         self.lock.release()
+
+    def moveUserToRow(self, fromRow, toRow):
+        self.lock.acquire()
+        users = self.getUsersInOrderByRow()
+        if fromRow > toRow:
+            users[fromRow].setTableRow(toRow)
+            for i in range(toRow,fromRow):
+                users[i].setTableRow(i+1)
+
+        elif toRow > fromRow:
+            users[fromRow].setTableRow(toRow-1)
+            for i in range(fromRow+1,toRow):
+                users[i].setTableRow(i-1)
+        self.lock.release()
+
 
     def clearAllChainResults(self):
         for i in self.getActiveUserIndexes():
@@ -1840,6 +2201,8 @@ class MessageTableModel(AbstractTableModel):
             roleEntry = self._db.getRoleByColumn(columnIndex, 'm')
             if roleEntry:
                 return roleEntry._name
+                # TODO (0.9): Maybe show the index here to help with constructing state files?
+                #return roleEntry._name+" (#"+str(roleEntry._index)+")"
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
@@ -1871,6 +2234,10 @@ class MessageTableModel(AbstractTableModel):
                 messageEntry._name = val
             elif col == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
                 messageEntry._regex = val
+                # Add this value to the array
+                if val and val not in self._db.arrayOfRegexes:
+                    self._db.arrayOfRegexes.append(val)
+                # TODO (0.9): Remove unused Regexes from that list
             else:
                 roleIndex = self._db.getRoleByColumn(col, 'm')._index
                 messageEntry.addRoleByIndex(roleIndex,val)
@@ -1884,6 +2251,10 @@ class MessageTableModel(AbstractTableModel):
                 # Backup option
                 # Update entire table since it affects color
                 # self.fireTableDataChanged()
+
+            # Refresh table so that combobox updates
+            self._extender._messageTable.redrawTable()
+
 
     # Set checkboxes editable
     def isCellEditable(self, row, col):
@@ -1928,11 +2299,12 @@ class MessageTable(JTable):
         originalTab = self.createRequestTabs(selectedMessage._requestResponse, True, selectedMessage._index)
         originalTab.setSelectedIndex(0)
         self._extender._tabs.addTab("Original",originalTab)
-        for userIndex in selectedMessage._userRuns.keys():
-            if not self.getModel()._db.arrayOfUsers[userIndex].isDeleted():
-                tabname = str(self.getModel()._db.arrayOfUsers[userIndex]._name)
-                self._extender._tabs.addTab(tabname,self.createRequestTabs(selectedMessage._userRuns[userIndex]))
-                
+
+        for userEntry in self.getModel()._db.getUsersInOrderByRow():
+            if userEntry._index in selectedMessage._userRuns.keys():
+                tabname = str(userEntry._name)
+                self._extender._tabs.addTab(tabname,self.createRequestTabs(selectedMessage._userRuns[userEntry._index]))
+                                
         JTable.changeSelection(self, row, col, toggle, extend)
         return
 
@@ -1963,6 +2335,16 @@ class MessageTable(JTable):
         # NOTE: this is prob ineffecient but it should catchall for changes to the table
         self.getModel().fireTableStructureChanged()
         self.getModel().fireTableDataChanged()
+
+        db = self.getModel()._db
+
+        # Regex comboboxes
+        regexComboBox = JComboBox(db.arrayOfRegexes)
+        regexComboBox.setEditable(True)
+        regexComboBoxEditor = DefaultCellEditor(regexComboBox)
+        self.getColumnModel().getColumn(2).setCellEditor(regexComboBoxEditor)
+
+
 
         # Resize
         self.getColumnModel().getColumn(0).setMinWidth(30);
@@ -2025,6 +2407,8 @@ class ChainTableModel(AbstractTableModel):
             return "Regex - Replace into HTTP Request"
         elif columnIndex == 5:
             return "Use Values From:"
+        elif columnIndex == 6:
+            return "Transformers"
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
@@ -2060,6 +2444,11 @@ class ChainTableModel(AbstractTableModel):
                     return self.chainFromDefault
                 else:
                     return ""
+            elif columnIndex == 6:
+                ret = "x"
+                for transformer in chainEntry._transformers:
+                    ret = transformer+"("+ret+")"
+                return "" if ret == "x" else ret
         return ""
 
     def addRow(self, row):
@@ -2098,6 +2487,11 @@ class ChainTableModel(AbstractTableModel):
                     chainEntry._sourceUser = user._index
                 else:
                     chainEntry._sourceUser = -1
+            elif col == 6:
+                if val == "(clear)":
+                    chainEntry.clearTransformers()
+                else:
+                    chainEntry.addTransformer(val)
 
             self.fireTableCellUpdated(row,col)
 
@@ -2134,13 +2528,19 @@ class ChainTable(JTable):
 
             db = self.getModel()._db
 
-            # Chain From comboboxes
-            users = [self.getModel().chainFromDefault]+[db.arrayOfUsers[x]._name for x in db.getActiveUserIndexes()]
+            # Chain Use Value From comboboxes
+            users = [self.getModel().chainFromDefault]+[userEntry._name for userEntry in db.getUsersInOrderByRow()]
             usersComboBox = JComboBox(users)
             usersComboBoxEditor = DefaultCellEditor(usersComboBox)
             self.getColumnModel().getColumn(5).setCellEditor(usersComboBoxEditor)
 
-            # FromID comboboxes
+            # Tranformers Combobox
+            transformers = ["(clear)"]+ChainEntry.TransformerList
+            transformerComboBox = JComboBox(transformers)
+            transformerComboBoxEditor = DefaultCellEditor(transformerComboBox)
+            self.getColumnModel().getColumn(6).setCellEditor(transformerComboBoxEditor)
+
+            # Source ID comboboxes
             sources = [sv._name for sv in db.arrayOfSVs] + [self.getModel().requestPrefix+str(x) for x in db.getActiveMessageIndexes()]
             sourcesComboBox = JComboBox(sources)
             sourcesComboBoxEditor = DefaultCellEditor(sourcesComboBox)
@@ -2205,10 +2605,13 @@ class ChainTable(JTable):
             self.getColumnModel().getColumn(3).setMaxWidth(320);        
             self.getColumnModel().getColumn(4).setMinWidth(180);
             self.getColumnModel().getColumn(5).setMinWidth(150);
-            self.getColumnModel().getColumn(5).setMaxWidth(270);        
+            self.getColumnModel().getColumn(5).setMaxWidth(270); 
+            self.getColumnModel().getColumn(6).setMinWidth(100);
+
 
 
 # For color-coding checkboxes in the message table
+# Also Grey when not enabled
 class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
 
     def __init__(self, defaultCellRender, db):
@@ -2234,46 +2637,53 @@ class SuccessBooleanRenderer(JCheckBox,TableCellRenderer):
         if column >= self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT:
             messageEntry = self._db.getMessageByRow(row)
             if messageEntry:
-                roleEntry = self._db.getRoleByColumn(column, 'm')
-                if roleEntry:
-                    roleIndex = roleEntry._index
-                    if not roleIndex in messageEntry._roleResults:
-                        if isSelected:
-                            cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
+                if messageEntry.isEnabled():
+                    roleEntry = self._db.getRoleByColumn(column, 'm')
+                    if roleEntry:
+                        roleIndex = roleEntry._index
+                        if not roleIndex in messageEntry._roleResults:
+                            if isSelected:
+                                cell.setBackground(table.getSelectionBackground())
+                            else:
+                                cell.setBackground(table.getBackground())
                         else:
-                            cell.setBackground(table.getBackground())
+                            # This site was used for generating color blends when selected (option 6 of 12)
+                            # http://meyerweb.com/eric/tools/color-blend/#FFCD81:00CCFF:10:hex
+                            sawExpectedResults = messageEntry._roleResults[roleIndex]
+                            checkboxChecked = messageEntry._roles[roleIndex]
+    
+                            # NOTE: currently no way to detect false positive in failure mode
+                            # failureRegexMode = messageEntry.isFailureRegex()
+    
+                            if sawExpectedResults:
+                                # Set Green if success
+                                if isSelected:
+                                    cell.setBackground(Color(0xC8,0xE0,0x51))
+                                else:
+                                    cell.setBackground(Color(0x87,0xf7,0x17))
+                            elif checkboxChecked:
+                                # Set Blue if its probably a false positive
+                                if isSelected:
+                                    cell.setBackground(Color(0x8B, 0xCD, 0xBA))
+                                else:
+                                    cell.setBackground(Color(0x00,0xCC,0xFF))
+                            else:
+                                # Set Red if fail
+                                if isSelected:
+                                    cell.setBackground(Color(0xFF, 0x87, 0x51))
+                                else:
+                                    cell.setBackground(Color(0xFF, 0x32, 0x17))
+                else:
+                    if isSelected:
+                        cell.setBackground(Color(0xD1,0xB5,0xA3))
                     else:
-                        # This site was used for generating color blends when selected (option 6 of 12)
-                        # http://meyerweb.com/eric/tools/color-blend/#FFCD81:00CCFF:10:hex
-                        sawExpectedResults = messageEntry._roleResults[roleIndex]
-                        checkboxChecked = messageEntry._roles[roleIndex]
-
-                        # NOTE: currently no way to detect false positive in failure mode
-                        # failureRegexMode = messageEntry.isFailureRegex()
-
-                        if sawExpectedResults:
-                            # Set Green if success
-                            if isSelected:
-                                cell.setBackground(Color(0xC8,0xE0,0x51))
-                            else:
-                                cell.setBackground(Color(0x87,0xf7,0x17))
-                        elif checkboxChecked:
-                            # Set Blue if its probably a false positive
-                            if isSelected:
-                                cell.setBackground(Color(0x8B, 0xCD, 0xBA))
-                            else:
-                                cell.setBackground(Color(0x00,0xCC,0xFF))
-                        else:
-                            # Set Red if fail
-                            if isSelected:
-                                cell.setBackground(Color(0xFF, 0x87, 0x51))
-                            else:
-                                cell.setBackground(Color(0xFF, 0x32, 0x17))
+                        cell.setBackground(Color.GRAY)
 
         return cell
       
 
 # For color-coding successregex in the message table
+# Also Grey when not enabled
 class RegexRenderer(JLabel, TableCellRenderer):
 
     def __init__(self, defaultCellRender, db):
@@ -2283,9 +2693,9 @@ class RegexRenderer(JLabel, TableCellRenderer):
     def getTableCellRendererComponent(self, table, value, isSelected, hasFocus, row, column):
         # Regex color
         cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+        messageEntry = self._db.getMessageByRow(row)
 
         if column == self._db.STATIC_MESSAGE_TABLE_COLUMN_COUNT-1:
-            messageEntry = self._db.getMessageByRow(row)
             if messageEntry:
                 if messageEntry.isFailureRegex():
                     # Set Grey if failure mode
@@ -2295,17 +2705,64 @@ class RegexRenderer(JLabel, TableCellRenderer):
                         cell.setBackground(Color(0x99,0x99,0xCC))
                 else:
                     if isSelected:
-                        cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
+                        cell.setBackground(table.getSelectionBackground())
                     else:
                         cell.setBackground(table.getBackground())
         else:
             if isSelected:
-                cell.setBackground(self._db.BURP_SELECTED_CELL_COLOR)
+                cell.setBackground(table.getSelectionBackground())
             else:
                 cell.setBackground(table.getBackground())
+        # Set grey if disabled
+        if messageEntry and not messageEntry.isEnabled():
+            if isSelected:
+                cell.setBackground(Color(0xD1,0xB5,0xA3))
+            else:
+                cell.setBackground(Color.GRAY)
         return cell
 
+# Default Renderer checking User Table for Enabled
+class UserEnabledRenderer(TableCellRenderer):
+    def __init__(self, defaultCellRender, db):
+        self._defaultCellRender = defaultCellRender
+        self._db = db
 
+    def getTableCellRendererComponent(self, table, value, isSelected, hasFocus, row, column):
+        # Regex color
+        cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+        userEntry = self._db.getUserByRow(row)
+        if userEntry and not userEntry.isEnabled():
+            if isSelected:
+                cell.setBackground(Color(0xD1,0xB5,0xA3))
+            else:
+                cell.setBackground(Color.GRAY)
+        elif isSelected:
+            cell.setBackground(table.getSelectionBackground())
+        else:
+            cell.setBackground(table.getBackground())
+        return cell
+
+# TODO (0.9): combine these classes
+# Default Renderer checking Chain Table for Enabled
+class ChainEnabledRenderer(TableCellRenderer):
+    def __init__(self, defaultCellRender, db):
+        self._defaultCellRender = defaultCellRender
+        self._db = db
+
+    def getTableCellRendererComponent(self, table, value, isSelected, hasFocus, row, column):
+        # Regex color
+        cell = self._defaultCellRender.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+        chainEntry = self._db.getChainByRow(row)
+        if chainEntry and not chainEntry.isEnabled():
+            if isSelected:
+                cell.setBackground(Color(0xD1,0xB5,0xA3))
+            else:
+                cell.setBackground(Color.GRAY)
+        elif isSelected:
+            cell.setBackground(table.getSelectionBackground())
+        else:
+            cell.setBackground(table.getBackground())
+        return cell
 
 
 
@@ -2315,7 +2772,7 @@ class RegexRenderer(JLabel, TableCellRenderer):
 
 class MessageEntry:
 
-    def __init__(self, index, tableRow, requestResponse, name = "", roles = {}, regex = "", deleted = False, failureRegexMode = False):
+    def __init__(self, index, tableRow, requestResponse, name = "", roles = {}, regex = "", deleted = False, failureRegexMode = False, enabled = True):
         self._index = index
         self._tableRow = tableRow
         self._requestResponse = requestResponse
@@ -2326,6 +2783,7 @@ class MessageEntry:
         self._deleted = deleted
         self._userRuns = {}
         self._roleResults = {}
+        self._enabled = enabled
         return
 
     # Role are the index of the db Role array and a bool for whether the checkbox is default enabled or not
@@ -2362,28 +2820,36 @@ class MessageEntry:
         self._roleResults = {}
         self._userRuns = {}
 
+    def isEnabled(self):
+        return self._enabled
+
+    def toggleEnabled(self):
+        self._enabled = not self._enabled
+
+
 class UserEntry:
 
-    def __init__(self, index, tableRow, name, roles = {}, deleted=False, cookies="", headers = []):
+    def __init__(self, index, tableRow, name, roles = {}, deleted=False, cookies="", headers = [], enabled = True):
         self._index = index
         self._name = name
         self._roles = roles.copy()
         self._deleted = deleted
         self._tableRow = tableRow
         self._cookies = cookies
-        self._headers = headers
+        self._headers = headers[:]
         self._chainResults = {}
+        self._enabled = enabled
         return
 
     # Roles are the index of the db role array and a bool for whether the checkbox is default enabled or not
     def addRoleByIndex(self, roleIndex, enabled=False):
         self._roles[roleIndex] = enabled
 
-    def addChainResultByMessageIndex(self, toID, toRegex, toValue):
+    def addChainResultByMessageIndex(self, toID, toValue, chainIndex):
         if not toID in self._chainResults:
-            self._chainResults[toID] = [(toRegex, toValue)]
+            self._chainResults[toID] = [(toValue, chainIndex)]
         else:
-            self._chainResults[toID].append((toRegex, toValue))
+            self._chainResults[toID].append((toValue, chainIndex))
 
     def getChainResultByMessageIndex(self, toID):
         if toID in self._chainResults:
@@ -2404,6 +2870,14 @@ class UserEntry:
 
     def getTableRow(self):
         return self._tableRow
+
+    def isEnabled(self):
+        return self._enabled
+
+    def toggleEnabled(self):
+        self._enabled = not self._enabled
+
+
 
 class RoleEntry:
 
@@ -2433,7 +2907,9 @@ class RoleEntry:
 
 class ChainEntry:
 
-    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser=-1):
+    TransformerList = ["base64","url","hex","sha1","sha256","sha512","md5"]
+    
+    def __init__(self, index, tableRow, name="", fromID="", fromRegex="", toID="", toRegex="", deleted=False, sourceUser=-1, enabled=True, transformers=[]):
         self._index = index
         self._fromID = fromID
         self._fromRegex = fromRegex
@@ -2447,6 +2923,9 @@ class ChainEntry:
         self._fromEnd = ""
         self._toStart = ""
         self._toEnd = ""
+        self._enabled = enabled
+        self._transformers = transformers[:] 
+
         return
 
     def setDeleted(self):
@@ -2516,6 +2995,46 @@ class ChainEntry:
         if self._fromID.startswith("SV_"):
             return self._fromID[3:]
         return None
+
+    def isEnabled(self):
+        return self._enabled
+
+    def toggleEnabled(self):
+        self._enabled = not self._enabled
+
+    def addTransformer(self, value):
+        self._transformers.append(value)
+
+    def clearTransformers(self):
+        self._transformers=[]
+
+    def transform(self, value, callbacks):
+        ret = value
+        if not ret:
+            return ""
+        try:
+            for transformer in self._transformers:
+                #self._transformerList = ["base64encode","urlencode","hexencode","sha1","sha256","sha512","md5"]
+                if transformer == self.TransformerList[0]:
+                    ret = base64.b64encode(ret)
+                elif transformer == self.TransformerList[1]:
+                    ret = urllib.quote_plus(ret)
+                elif transformer == self.TransformerList[2]:
+                    ret = base64.b16encode(ret)
+                elif transformer == self.TransformerList[3]:
+                    ret = hashlib.sha1(ret).hexdigest()
+                elif transformer == self.TransformerList[4]:
+                    ret = hashlib.sha256(ret).hexdigest()
+                elif transformer == self.TransformerList[5]:
+                    ret = hashlib.sha512(ret).hexdigest()
+                elif transformer == self.TransformerList[6]:
+                    ret = hashlib.md5(ret).hexdigest()
+        except:
+            traceback.print_exc(file=callbacks.getStderr())
+            return value
+        return ret
+
+
 
 class SVEntry:
 
@@ -2606,7 +3125,7 @@ class RequestResponseStored(IHttpRequestResponse):
 ## Drag and Drop
 ##
 
-class MessageTableRowTransferHandler(TransferHandler):
+class RowTransferHandler(TransferHandler):
 
     def __init__(self, table):
         self._table = table
@@ -2636,7 +3155,13 @@ class MessageTableRowTransferHandler(TransferHandler):
             index = tablemax
 
         rowFrom = info.getTransferable().getTransferData(DataFlavor.stringFlavor)
-        self._table.getModel()._db.moveMessageToRow(int(rowFrom), int(index))
+
+        if isinstance(self._table, MessageTable):
+            self._table.getModel()._db.moveMessageToRow(int(rowFrom), int(index))
+        elif isinstance(self._table, UserTable):
+            self._table.getModel()._db.moveUserToRow(int(rowFrom), int(index))
+
+
         return True
 
 
