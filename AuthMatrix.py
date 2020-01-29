@@ -81,7 +81,7 @@ import random
 import string
 
 
-AUTHMATRIX_VERSION = "0.8"
+AUTHMATRIX_VERSION = "0.8.1"
 
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
@@ -398,10 +398,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         roleRemoveFromMessageTable = JMenuItem("Remove Role")
         roleRemoveFromMessageTable.addActionListener(actionRemoveColumn("m"))
         messageHeaderPopup.add(roleRemoveFromMessageTable)
-        enableToggle = JMenuItem("Select checkboxes")
+        enableToggle = JMenuItem("Bulk Select Checkboxes")
         enableToggle.addActionListener(actionSetToggleForRole(True))
         messageHeaderPopup.add(enableToggle)
-        disableToggle = JMenuItem("Unselect checkboxes")
+        disableToggle = JMenuItem("Bulk Unselect Checkboxes")
         disableToggle.addActionListener(actionSetToggleForRole(False))
         messageHeaderPopup.add(disableToggle)
 
