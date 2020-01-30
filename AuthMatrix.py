@@ -81,7 +81,7 @@ import random
 import string
 
 
-AUTHMATRIX_VERSION = "0.8"
+AUTHMATRIX_VERSION = "0.8.1"
 
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
@@ -356,6 +356,19 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     selfExtender._selectedColumn = -1
                     selfExtender._messageTable.redrawTable()
 
+        class actionSetToggleForRole(ActionListener):
+            def __init__(self, enabled):
+                self._enabled = enabled
+
+            def actionPerformed(self, e):
+                if selfExtender._selectedColumn >= 0:
+                    messageIndexes = [selfExtender._db.getMessageByRow(rowNum)._index for rowNum in selfExtender._messageTable.getSelectedRows()]
+                    for messageIndex in messageIndexes:
+                        roleIndex = selfExtender._db.getRoleByColumn(selfExtender._selectedColumn, "m")._index
+                        selfExtender._db.setToggleForRole(messageIndex, roleIndex, self._enabled)
+                    selfExtender._selectedColumn = -1
+                    selfExtender._messageTable.redrawTable()
+
         # Message Table popups
         messagePopup = JPopupMenu()
         addPopup(self._messageTable,messagePopup)
@@ -385,6 +398,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         roleRemoveFromMessageTable = JMenuItem("Remove Role")
         roleRemoveFromMessageTable.addActionListener(actionRemoveColumn("m"))
         messageHeaderPopup.add(roleRemoveFromMessageTable)
+        enableToggle = JMenuItem("Bulk Select Checkboxes")
+        enableToggle.addActionListener(actionSetToggleForRole(True))
+        messageHeaderPopup.add(enableToggle)
+        disableToggle = JMenuItem("Bulk Unselect Checkboxes")
+        disableToggle.addActionListener(actionSetToggleForRole(False))
+        messageHeaderPopup.add(disableToggle)
 
         # User Table popup
         userPopup = JPopupMenu()
@@ -1948,6 +1967,12 @@ class MatrixDB():
 
         self.lock.release()
 
+    def setToggleForRole(self, messageIndex, roleIndex, enabled):
+        self.lock.acquire()
+        messageEntry = self.arrayOfMessages[messageIndex]
+        messageEntry.setToggleForRoleByIndex(roleIndex, enabled)
+        self.lock.release()
+
     def deleteChain(self,chainIndex):
         self.lock.acquire()
         chainEntry = self.arrayOfChains[chainIndex]
@@ -2788,6 +2813,9 @@ class MessageEntry:
 
     # Role are the index of the db Role array and a bool for whether the checkbox is default enabled or not
     def addRoleByIndex(self,roleIndex,enabled=False):
+        self._roles[roleIndex] = enabled;
+
+    def setToggleForRoleByIndex(self, roleIndex, enabled):
         self._roles[roleIndex] = enabled;
 
     # Add one Run Result of user x message
