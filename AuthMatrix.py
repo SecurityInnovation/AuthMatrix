@@ -81,7 +81,7 @@ import random
 import string
 
 
-AUTHMATRIX_VERSION = "0.8.1"
+AUTHMATRIX_VERSION = "0.8.2"
 
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory):
@@ -1633,7 +1633,7 @@ class MatrixDB():
                     if deleted:
                         self.deletedMessageCount += 1
         
-                    regex = "" if "regexBase64" not in messageEntry else base64.b64decode(messageEntry["regexBase64"])
+                    regex = "" if "regexBase64" not in messageEntry else base64.b64decode(messageEntry["regexBase64"]).decode("utf-8")
         
                     if regex and regex not in self.arrayOfRegexes:
                         self.arrayOfRegexes.append(regex)
@@ -1643,7 +1643,7 @@ class MatrixDB():
                             messageEntry["host"],
                             messageEntry["port"],
                             messageEntry["protocol"],
-                            StringUtil.toBytes(base64.b64decode(messageEntry["requestBase64"])))
+                            StringUtil.toBytes((base64.b64decode(messageEntry["requestBase64"])).decode("utf-8")))
         
                     self.arrayOfMessages.add(MessageEntry(
                         messageEntry["index"],
@@ -1673,9 +1673,9 @@ class MatrixDB():
                         chainEntry["tableRow"],
                         name = "" if "name" not in chainEntry else chainEntry["name"],
                         fromID = "" if "fromID" not in chainEntry else chainEntry["fromID"],
-                        fromRegex = "" if "fromRegexBase64" not in chainEntry else base64.b64decode(chainEntry["fromRegexBase64"]),
+                        fromRegex = "" if "fromRegexBase64" not in chainEntry else base64.b64decode(chainEntry["fromRegexBase64"]).decode("utf-8"),
                         toID = "" if "toID" not in chainEntry else chainEntry["toID"],
-                        toRegex = "" if "toRegexBase64" not in chainEntry else base64.b64decode(chainEntry["toRegexBase64"]),
+                        toRegex = "" if "toRegexBase64" not in chainEntry else base64.b64decode(chainEntry["toRegexBase64"]).decode("utf-8"),
                         deleted = deleted,
                         sourceUser = -1 if "sourceUser" not in chainEntry else chainEntry["sourceUser"],
                         enabled = True if "enabled" not in chainEntry else chainEntry["enabled"],
@@ -1805,8 +1805,8 @@ class MatrixDB():
                     "deleted":deleted,
                     "enabled":userEntry._enabled,
                     "tableRow":userEntry._tableRow if not deleted else None,
-                    "cookiesBase64":base64.b64encode(userEntry._cookies) if userEntry._cookies and not deleted else "",
-                    "headersBase64":[base64.b64encode(x) if x else "" for x in userEntry._headers] if not deleted else [],
+                    "cookiesBase64":base64.b64encode(userEntry._cookies.encode("utf-8")) if userEntry._cookies and not deleted else "",
+                    "headersBase64":[base64.b64encode(x.encode("utf-8")) if x else "" for x in userEntry._headers] if not deleted else [],
                     "chainResults":userEntry._chainResults if not deleted else {}
                 })
 
@@ -1816,19 +1816,19 @@ class MatrixDB():
             stateDict["arrayOfMessages"].append({
                     "index":messageEntry._index, 
                     "tableRow":messageEntry._tableRow if not deleted else None,
-                    "requestBase64":base64.b64encode(StringUtil.fromBytes(messageEntry._requestResponse.getRequest())) if not deleted else None,
+                    "requestBase64":base64.b64encode(StringUtil.fromBytes(messageEntry._requestResponse.getRequest()).encode("utf-8")) if not deleted else None,
                     "host":messageEntry._requestResponse.getHttpService().getHost() if not deleted else None,
                     "port":messageEntry._requestResponse.getHttpService().getPort() if not deleted else None,
                     "protocol":messageEntry._requestResponse.getHttpService().getProtocol() if not deleted else None,
                     "name":messageEntry._name if not deleted else None, 
                     "roles":messageEntry._roles if not deleted else {}, 
-                    "regexBase64":base64.b64encode(messageEntry._regex) if messageEntry._regex and not deleted else "", 
+                    "regexBase64":base64.b64encode(messageEntry._regex.encode("utf-8")) if messageEntry._regex and not deleted else "", 
                     "deleted":deleted,
                     "enabled":messageEntry._enabled,
                     "failureRegexMode":messageEntry._failureRegexMode if not deleted else None,
                     "runBase64ForUserID":{int(x): {
-                        "request": None if not messageEntry._userRuns[x] or not messageEntry._userRuns[x].getRequest() else base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getRequest())),
-                        "response": None if not messageEntry._userRuns[x] or not messageEntry._userRuns[x].getResponse() else base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getResponse()))}
+                        "request": None if not messageEntry._userRuns[x] or not messageEntry._userRuns[x].getRequest() else base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getRequest()).encode("utf-8")),
+                        "response": None if not messageEntry._userRuns[x] or not messageEntry._userRuns[x].getResponse() else base64.b64encode(StringUtil.fromBytes(messageEntry._userRuns[x].getResponse()).encode("utf-8"))}
                         for x in messageEntry._userRuns.keys()} if not deleted else {},
                     "runResultForRoleID":messageEntry._roleResults if not deleted else {}
                 })
@@ -1839,9 +1839,9 @@ class MatrixDB():
             stateDict["arrayOfChains"].append({
                     "index":chainEntry._index,
                     "fromID":chainEntry._fromID if not deleted else None,
-                    "fromRegexBase64":base64.b64encode(chainEntry._fromRegex) if chainEntry._fromRegex and not deleted else "",
+                    "fromRegexBase64":base64.b64encode(chainEntry._fromRegex.encode("utf-8")) if chainEntry._fromRegex and not deleted else "",
                     "toID":chainEntry._toID if not deleted else None,
-                    "toRegexBase64":base64.b64encode(chainEntry._toRegex) if chainEntry._toRegex and not deleted else "",
+                    "toRegexBase64":base64.b64encode(chainEntry._toRegex.encode("utf-8")) if chainEntry._toRegex and not deleted else "",
                     "deleted":deleted,
                     "enabled":chainEntry._enabled,
                     "tableRow":chainEntry._tableRow if not deleted else None,
@@ -3044,7 +3044,7 @@ class ChainEntry:
             for transformer in self._transformers:
                 #self._transformerList = ["base64encode","urlencode","hexencode","sha1","sha256","sha512","md5"]
                 if transformer == self.TransformerList[0]:
-                    ret = base64.b64encode(ret)
+                    ret = base64.b64encode(ret.encode('utf-8'))
                 elif transformer == self.TransformerList[1]:
                     ret = urllib.quote_plus(ret)
                 elif transformer == self.TransformerList[2]:
