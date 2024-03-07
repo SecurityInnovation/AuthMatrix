@@ -622,8 +622,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     valid = False
 
         if valid:
-            menuItem = JMenuItem("Send request(s) to AuthMatrix");
-            menuItem.addActionListener(addRequestsToTab)
+            menuItem = JMenuItem("Send request(s) to AuthMatrix", actionPerformed=addRequestsToTab);
             ret.append(menuItem)
 
             if len(messages)==1:
